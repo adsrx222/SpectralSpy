@@ -1,0 +1,8 @@
+Benchmark,Category,Count,Mean,P50,P90,P95,P99,StdDev
+End-To-End Latency (ms),Latency,100,3.48,3.00,4.00,4.00,5.00,0.56
+Hash Entropy (bits),Quality,0,9.16,0.00,0.00,0.00,0.00,0.00
+Hash Collisions,Quality,0,10.00,0.00,0.00,0.00,0.00,0.00
+API Latency (1 users) ms,API Load,1,0.00,0.00,0.00,0.00,0.00,0.00
+API Latency (10 users) ms,API Load,10,0.50,0.50,1.00,1.00,1.00,0.50
+API Latency (100 users) ms,API Load,100,0.72,0.00,2.00,3.00,4.02,1.00
+API Latency (500 users) ms,API Load,500,3.23,1.00,11.00,16.00,26.00,5.60

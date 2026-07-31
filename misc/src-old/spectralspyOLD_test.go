@@ -13,9 +13,7 @@ import (
 	"github.com/hajimehoshi/go-mp3"
 )
 
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
+// helpers
 
 func makeSilence(n int) []float64 { return make([]float64, n) }
 
@@ -107,9 +105,7 @@ func hashSet(entries []HashEntry) map[uint64]struct{} {
 	return m
 }
 
-// // ─────────────────────────────────────────────
-// // chunkWorker
-// // ─────────────────────────────────────────────
+// chunkWorker
 
 func TestChunkWorker_ChannelClosesAfterDrain(t *testing.T) {
 	ctx := context.Background()
@@ -210,9 +206,7 @@ func TestChunkWorker_ShortInput(t *testing.T) {
 	}
 }
 
-// // ─────────────────────────────────────────────
-// // fftWorker
-// // ─────────────────────────────────────────────
+// fftWorker
 
 func fftPipeline(ctx context.Context, samples []float64) []FrameChunk {
 	return drainFrames(fftWorker(ctx, chunkWorker(ctx, samples)))
@@ -358,9 +352,7 @@ func TestBuildSpectrogram_SilenceAllZero(t *testing.T) {
 	}
 }
 
-// // // ─────────────────────────────────────────────
-// // // findPeaks
-// // // ─────────────────────────────────────────────
+// findPeaks
 
 func makeSpectrogram(samples []float64) SpectrogramData {
 	ctx := context.Background()
@@ -465,9 +457,7 @@ func TestFindPeaks_BinIndexConsistent(t *testing.T) {
 	}
 }
 
-// // ─────────────────────────────────────────────
-// // hashPair
-// // ─────────────────────────────────────────────
+// hashPair()
 
 func makePoint(ts, freq, mag float64) ConstellationPoint {
 	return ConstellationPoint{
@@ -546,9 +536,7 @@ func TestHashPair_AbsolutePositionDoesNotMatter(t *testing.T) {
 	}
 }
 
-// // ─────────────────────────────────────────────
-// // generateHashEntries
-// // ─────────────────────────────────────────────
+// generateHashEntries()
 
 func makePeaks(numFrames, peaksPerFrame int, baseFreq, baseTime float64) [][]ConstellationPoint {
 	binHz := float64(SAMPLE_RATE) / float64(WINDOW_SIZE)
@@ -678,9 +666,7 @@ func TestGenerateHashEntries_DifferentPeaksDifferentHashes(t *testing.T) {
 	}
 }
 
-// // // ─────────────────────────────────────────────
-// // // Process (integration)
-// // // ─────────────────────────────────────────────
+// Process()
 
 func TestProcess_ReturnsSomething(t *testing.T) {
 	entries := Process(context.Background(), makeSine(SAMPLE_RATE*2, 440))
@@ -779,7 +765,7 @@ func TestProcess_PositionIndependentHashes(t *testing.T) {
 }
 
 func TestGenerateHashes(t *testing.T) {
-	samples, err := loadMP3("../artifacts/testdata/001.mp3")
+	samples, err := loadMP3("../testdata/001.mp3")
 	if err != nil {
 		t.Fatalf("failed to load mp3: %v", err)
 	}
@@ -796,12 +782,8 @@ func TestGenerateHashes(t *testing.T) {
 	}
 }
 
-// ─────────────────────────────────────────────
-// TestHashMatchClip
-// ─────────────────────────────────────────────
-
 func TestHashMatchClip(t *testing.T) {
-	samples, err := loadMP3("../artifacts/testdata/001.mp3")
+	samples, err := loadMP3("../testdata/001.mp3")
 	if err != nil {
 		t.Fatalf("failed to load mp3: %v", err)
 	}
@@ -861,45 +843,3 @@ func TestHashMatchClip(t *testing.T) {
 		fmt.Printf("... and %d more\n", len(matched)-200)
 	}
 }
-
-// ─────────────────────────────────────────────
-// Performance Benchmarks
-// ─────────────────────────────────────────────
-
-// func TestPerformance_SpectrogramPipeline(t *testing.T) {
-// 	// This test measures the compound effect of the old channel-based pipeline
-// 	// vs the new consolidated scatter-gather Spectrogram builder.
-// 	samples := makeSine(SAMPLE_RATE*30, 1000)
-// 	iterations := 5
-
-// 	// 1. Benchmark OLD Pipeline (Channels)
-// 	var totalOld time.Duration
-// 	for i := 0; i < iterations; i++ {
-// 		ctx := context.Background()
-		
-// 		start := time.Now()
-// 		// The old pipeline required 3 separate stages and channel communication
-// 		_ = Process_OLD(ctx, samples)
-// 		totalOld += time.Since(start)
-// 	}
-// 	avgOld := totalOld / time.Duration(iterations)
-
-// 	// 2. Benchmark NEW Pipeline (Scatter-Gather Array)
-// 	var totalNew time.Duration
-// 	for i := 0; i < iterations; i++ {
-// 		ctx := context.Background()
-		
-// 		start := time.Now()
-// 		// The new pipeline does chunking, FFT, and building in a single pass
-// 		_ = Process(ctx, samples)
-// 		totalNew += time.Since(start)
-// 	}
-// 	avgNew := totalNew / time.Duration(iterations)
-
-// 	// 3. Output the results
-// 	t.Logf("Spectrogram Pipeline Average Time (30s audio, %d iterations):", iterations)
-// 	t.Logf("OLD Pipeline (Channels):       %v", avgOld)
-// 	t.Logf("NEW Pipeline (Scatter-Gather): %v", avgNew)
-// 	t.Logf("Speedup Multiplier: %.2fx", float64(avgOld)/float64(avgNew))
-// }
-

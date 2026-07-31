@@ -13,9 +13,7 @@ import (
 	"github.com/hajimehoshi/go-mp3"
 )
 
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
+// HELPERS
 
 func makeSilence(n int) []float64 { return make([]float64, n) }
 
@@ -91,9 +89,7 @@ func hashSet(entries []HashEntry) map[uint64]struct{} {
 	return m
 }
 
-// // // ─────────────────────────────────────────────
-// // // findPeaks
-// // // ─────────────────────────────────────────────
+// findPeaks()
 
 func makeSpectrogram(samples []float64) SpectrogramData {
 	ctx := context.Background()
@@ -203,9 +199,7 @@ func TestFindPeaks_BinIndexConsistent(t *testing.T) {
 	}
 }
 
-// // ─────────────────────────────────────────────
-// // hashPair
-// // ─────────────────────────────────────────────
+// hashPair()
 
 func makePoint(ts, freq, mag float64) ConstellationPoint {
 	return ConstellationPoint{
@@ -284,9 +278,7 @@ func TestHashPair_AbsolutePositionDoesNotMatter(t *testing.T) {
 	}
 }
 
-// // ─────────────────────────────────────────────
-// // generateHashEntries
-// // ─────────────────────────────────────────────
+// generateHashEntries()
 
 func makePeaks(numFrames, peaksPerFrame int, baseFreq, baseTime float64) [][]ConstellationPoint {
 	binHz := float64(SAMPLE_RATE) / float64(WINDOW_SIZE)
@@ -423,9 +415,7 @@ func TestGenerateHashEntries_DifferentPeaksDifferentHashes(t *testing.T) {
 	}
 }
 
-// // // ─────────────────────────────────────────────
-// // // Process (integration)
-// // // ─────────────────────────────────────────────
+// Process()
 
 func TestProcess_ReturnsSomething(t *testing.T) {
 	entries := Process(context.Background(), makeSine(SAMPLE_RATE*2, 440))
@@ -524,7 +514,7 @@ func TestProcess_PositionIndependentHashes(t *testing.T) {
 }
 
 func TestGenerateHashes(t *testing.T) {
-	samples, err := loadMP3("../artifacts/testdata/001.mp3")
+	samples, err := loadMP3("../../misc/testdata/001.mp3")
 	if err != nil {
 		t.Fatalf("failed to load mp3: %v", err)
 	}
@@ -541,12 +531,10 @@ func TestGenerateHashes(t *testing.T) {
 	}
 }
 
-// ─────────────────────────────────────────────
-// TestHashMatchClip
-// ─────────────────────────────────────────────
+// Test Matching
 
 func TestHashMatchClip(t *testing.T) {
-	samples, err := loadMP3("../artifacts/testdata/001.mp3")
+	samples, err := loadMP3("../../misc/testdata/001.mp3")
 	if err != nil {
 		t.Fatalf("failed to load mp3: %v", err)
 	}

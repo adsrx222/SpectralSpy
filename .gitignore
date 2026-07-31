@@ -1,3 +1,4 @@
 .env
-hashes.sqlite
-artifacts/
+misc/testdata
+misc/workspace
+benchmark.md

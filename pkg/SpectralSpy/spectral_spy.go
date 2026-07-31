@@ -3,7 +3,7 @@ package SpectralSpy
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
+	//"fmt"
 	"math"
 	"runtime"
 	"sync"
@@ -22,6 +22,7 @@ const PEAK_NEIGHBORHOOD_FREQ = 5 // ±FFT bins
 const TARGET_ZONE_TIME_START = 2  // frames ahead where zone begins
 const TARGET_ZONE_TIME_END   = 7  // frames ahead where zone ends
 const TARGET_ZONE_FREQ_BINS  = 10 // ±FFT bins around anchor frequency bin
+const MAX_FAN_OUT = 10
 
 var HANN_WINDOW = func() []float64 {
 	w := make([]float64, WINDOW_SIZE)
@@ -226,10 +227,11 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Ha
 
 	results := make([][]HashEntry, numWorkers)
 	var wg sync.WaitGroup
+
 	for w := 0; w < numWorkers; w++ {
 		start := w * framesPerWorker
-		end := min((start + framesPerWorker), numFrames)
-		
+		end := min(start+framesPerWorker, numFrames)
+
 		if start >= numFrames {
 			break
 		}
@@ -237,61 +239,70 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Ha
 		wg.Add(1)
 		go func(start, end, workerID int) {
 			defer wg.Done()
-			
-			// pre-allocate array to prevent reallocation ops.
+
+			// pre-allocate to reduce reallocs
 			local := make([]HashEntry, 0, 1024)
 
 			for anchorT := start; anchorT < end; anchorT++ {
 				if ctx.Err() != nil {
 					return
 				}
-				
+
 				// clamp time boundaries per anchor frame
 				tetherStart := anchorT + TARGET_ZONE_TIME_START
 				tetherEnd := min(anchorT+TARGET_ZONE_TIME_END, numFrames-1)
-				
+
 				for _, anchor := range peaks[anchorT] {
 					// clamp frequency bin range
 					minBin := anchor.BinIndex - TARGET_ZONE_FREQ_BINS
 					maxBin := anchor.BinIndex + TARGET_ZONE_FREQ_BINS
-					
+
+					matches := 0
+
+				tetherSearch:
 					for tetherT := tetherStart; tetherT <= tetherEnd; tetherT++ {
 						for _, tether := range peaks[tetherT] {
-							
-							// since peaks are sorted in order, we can use filters
+
+							// since peaks are sorted, skip until we enter the target band
 							if tether.BinIndex < minBin {
-								continue // not in the target zone yet, keep looking
+								continue
 							}
+
 							if tether.BinIndex > maxBin {
-								break // we have passed the target zone. stop checking the rest of this frame
+								break
 							}
-							
+
 							local = append(local, HashEntry{
 								Hash:       hashPair(anchor, tether),
 								AnchorTime: anchor.Timestamp,
 							})
+
+							matches++
+							if matches >= MAX_FAN_OUT {
+								break tetherSearch
+							}
 						}
 					}
 				}
 			}
+
 			results[workerID] = local
 		}(start, end, w)
 	}
 
 	wg.Wait()
 
-	// consolidate the array of slices into a single flat array
-	var totalLen int
+	// consolidate worker slices
+	totalLen := 0
 	for _, r := range results {
 		totalLen += len(r)
 	}
 
-	// pre-allocate final slice
 	all := make([]HashEntry, totalLen)
 
-	var offset int
+	offset := 0
 	for _, r := range results {
-		copy(all[offset:], r) // copy() writes directly to memory without capacity checks
+		copy(all[offset:], r)
 		offset += len(r)
 	}
 
@@ -299,9 +310,7 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Ha
 }
 
 func Process(ctx context.Context, samples []float64) []HashEntry {
-	sg := buildSpectrogram(ctx, samples)
-	fmt.Println("Spectrogram Built")
-	
+	sg := buildSpectrogram(ctx, samples)	
 	peaks := findPeaks(ctx, sg)
 	return generateHashEntries(ctx, peaks)
 }

@@ -78,7 +78,6 @@ type SongMetadataInfo struct {
 	NoiseType     string `json:"noise_type"`
 }
 
-// EvaluationQuery represents a generated query snippet augmented with distortions.
 type EvaluationQuery struct {
 	Samples        []float64
 	ExpectedSongID string
@@ -131,7 +130,7 @@ func Percentile(sorted []float64, p float64) float64 {
 	return sorted[lower]*(1.0-weight) + sorted[upper]*weight
 }
 
-func AddNoise(signal []float64, snrDB float64) []float64 {
+func AddNoise(signal []float64, snrDB float64, rng *rand.Rand) []float64 {
 	var signalPower float64
 	for _, s := range signal {
 		signalPower += s * s
@@ -143,24 +142,39 @@ func AddNoise(signal []float64, snrDB float64) []float64 {
 
 	noisy := make([]float64, len(signal))
 	for i, s := range signal {
-		noisy[i] = s + (rand.NormFloat64() * noiseAmp)
+		var norm float64
+		if rng != nil {
+			norm = rng.NormFloat64()
+		} else {
+			norm = rand.NormFloat64()
+		}
+		noisy[i] = s + (norm * noiseAmp)
 	}
 	return noisy
 }
 
-func SimulateCompression(signal []float64, cutoffHz float64) []float64 {
-	windowSize := int(SpectralSpy.SAMPLE_RATE / cutoffHz)
-	if windowSize < 1 {
-		windowSize = 1
+func SimulateCompression(signal []float64, bitrateKbps float64) []float64 {
+	bitDepth := 8.0
+	cutoffHz := 16000.0
+	
+	if bitrateKbps <= 64.0 {
+		bitDepth = 6.0
+		cutoffHz = 10000.0
 	}
+
+	steps := math.Pow(2, bitDepth)
 	compressed := make([]float64, len(signal))
-	var sum float64
-	for i := 0; i < len(signal); i++ {
-		sum += signal[i]
-		if i >= windowSize {
-			sum -= signal[i-windowSize]
-		}
-		compressed[i] = sum / float64(windowSize)
+	
+	dt := 1.0 / float64(SpectralSpy.SAMPLE_RATE)
+	rc := 1.0 / (2 * math.Pi * cutoffHz)
+	alpha := dt / (rc + dt)
+
+	prev := 0.0
+	for i, s := range signal {
+		quantized := math.Round(s*steps) / steps
+		val := prev + alpha*(quantized-prev)
+		compressed[i] = val
+		prev = val
 	}
 	return compressed
 }
@@ -190,7 +204,6 @@ func GetContinuousSwath(fingerprints []server.Fingerprint, maxLen int) []server.
 	return fingerprints[startIdx : startIdx+maxLen]
 }
 
-// SetupTestDB returns a raw *sql.DB.
 func SetupTestDB(t *testing.T, dbPath string) *sql.DB {
 	if t != nil {
 		t.Helper()
@@ -214,7 +227,6 @@ func SetupTestDB(t *testing.T, dbPath string) *sql.DB {
 	return dbConn
 }
 
-// SetupMockS3 returns standard HTTP server types for S3 mocking.
 func SetupMockS3(t *testing.T) *httptest.Server {
 	if t != nil {
 		t.Helper()
@@ -225,7 +237,6 @@ func SetupMockS3(t *testing.T) *httptest.Server {
 	}))
 }
 
-// DecodeWavToFloat64 converts raw PCM audio data into float64 slices.
 func DecodeWavToFloat64(r io.Reader) ([]float64, error) {
 	rs, ok := r.(io.ReadSeeker)
 	if !ok {
@@ -289,8 +300,6 @@ func DecodeWavToFloat64(r io.Reader) ([]float64, error) {
 	return samples, nil
 }
 
-// GetRandomMaestroSong reads the JSON dataset, selects a song, extracts its WAV directly
-// to disk if not already cached, and returns the raw float64 samples alongside its computed ID.
 func GetRandomMaestroSong(workspaceDir string) ([]float64, string, error) {
 	jsonPath := filepath.Join(workspaceDir, "maestro-v3.0.0.json")
 	file, err := os.ReadFile(jsonPath)
@@ -318,7 +327,7 @@ func GetRandomMaestroSong(workspaceDir string) ([]float64, string, error) {
 	hash64 := xxh3.HashString(wavPath)
 	songID := strconv.FormatUint(hash64, 36)
 
-	// Check if the WAV file is already extracted on disk
+	// check if the WAV file is already extracted on disk
 	extractedPath := filepath.Join(workspaceDir, wavPath)
 	if wavFile, err := os.Open(extractedPath); err == nil {
 		fmt.Printf("  [testutil] Reading pre-extracted WAV directly from disk: %s\n", extractedPath)
@@ -330,7 +339,7 @@ func GetRandomMaestroSong(workspaceDir string) ([]float64, string, error) {
 		return samples, songID, nil
 	}
 
-	// Extract single target file to disk cache
+	// extract single target file to disk cache
 	fmt.Printf("  [testutil] Unzipping target track to disk cache: %s\n", wavPath)
 	zipPath := filepath.Join(workspaceDir, "maestro-v3.0.0.zip")
 	zr, err := zip.OpenReader(zipPath)
@@ -379,11 +388,9 @@ func GetRandomMaestroSong(workspaceDir string) ([]float64, string, error) {
 	return nil, "", fmt.Errorf("wav file %s not found in archive", wavPath)
 }
 
-// Helper to get stratum key
 func GetStratumKey(composer, title string, year int) string {
-	genre := composer // Composer as genre proxy
+	genre := composer
 	
-	// Instrumentation proxy based on year
 	instrumentation := "modern"
 	if year < 2008 {
 		instrumentation = "early"
@@ -391,7 +398,6 @@ func GetStratumKey(composer, title string, year int) string {
 		instrumentation = "mid"
 	}
 
-	// Tempo proxy from title keywords
 	titleLower := strings.ToLower(title)
 	tempo := "medium"
 	if strings.Contains(titleLower, "allegro") || strings.Contains(titleLower, "presto") || strings.Contains(titleLower, "vivace") || strings.Contains(titleLower, "scherzo") {
@@ -403,14 +409,11 @@ func GetStratumKey(composer, title string, year int) string {
 	return fmt.Sprintf("%s|%s|%s", genre, instrumentation, tempo)
 }
 
-// GenerateSilence generates a slice of zeros representing silent audio.
 func GenerateSilence(durationSec float64, sampleRate int) []float64 {
 	length := int(durationSec * float64(sampleRate))
 	return make([]float64, length)
 }
 
-// GenerateRepetitiveKickDrum generates a series of low-frequency sine sweeps
-// resembling an electronic kick drum at regular intervals (120 BPM / every 0.5s).
 func GenerateRepetitiveKickDrum(durationSec float64, sampleRate int) []float64 {
 	length := int(durationSec * float64(sampleRate))
 	samples := make([]float64, length)
@@ -432,9 +435,6 @@ func GenerateRepetitiveKickDrum(durationSec float64, sampleRate int) []float64 {
 	return samples
 }
 
-// StratifiedSampleMaestro performs stratified random sampling on the Maestro dataset.
-// It samples samplePercentage (e.g. 0.01 - 0.05) from each metadata group (genre, instrumentation, tempo).
-// It also appends synthetic noise tracks (repetitive kick drums, classical silence).
 func StratifiedSampleMaestro(workspaceDir string, samplePercentage float64) ([]SongMetadataInfo, error) {
 	jsonPath := filepath.Join(workspaceDir, "maestro-v3.0.0.json")
 	file, err := os.ReadFile(jsonPath)
@@ -472,25 +472,22 @@ func StratifiedSampleMaestro(workspaceDir string, samplePercentage float64) ([]S
 		groups[stratum] = append(groups[stratum], song)
 	}
 
-	// Sample from each group randomly
 	var sampled []SongMetadataInfo
-	rng := rand.New(rand.NewSource(42)) // Deterministic seed
+	rng := rand.New(rand.NewSource(42))
 
 	for _, songs := range groups {
 		groupSize := len(songs)
 		sampleCount := int(math.Round(float64(groupSize) * samplePercentage))
 		if sampleCount < 1 && groupSize > 0 {
-			sampleCount = 1 // Ensure at least 1 per stratum if group is non-empty
+			sampleCount = 1
 		}
 		
-		// Shuffle group indices
 		indices := rng.Perm(groupSize)
 		for idx := 0; idx < sampleCount && idx < groupSize; idx++ {
 			sampled = append(sampled, songs[indices[idx]])
 		}
 	}
 
-	// Append synthetic noise tracks
 	noiseTracks := []SongMetadataInfo{
 		{
 			SongID:    "noise_silence",
@@ -512,9 +509,6 @@ func StratifiedSampleMaestro(workspaceDir string, samplePercentage float64) ([]S
 	return sampled, nil
 }
 
-// GetAudioForTrack returns the float64 audio samples for a SongMetadataInfo track.
-// If the track is a noise track, it generates the synthetic samples on the fly.
-// Otherwise, it retrieves the track from the workspace maestro files.
 func GetAudioForTrack(workspaceDir string, track SongMetadataInfo) ([]float64, error) {
 	if track.IsNoise {
 		if track.NoiseType == "silence" {
@@ -526,14 +520,12 @@ func GetAudioForTrack(workspaceDir string, track SongMetadataInfo) ([]float64, e
 		return nil, fmt.Errorf("unknown noise type: %s", track.NoiseType)
 	}
 
-	// Read standard song from maestro
 	extractedPath := filepath.Join(workspaceDir, track.AudioFilename)
 	if wavFile, err := os.Open(extractedPath); err == nil {
 		defer wavFile.Close()
 		return DecodeWavToFloat64(wavFile)
 	}
 
-	// Extract from ZIP to cache if not on disk
 	zipPath := filepath.Join(workspaceDir, "maestro-v3.0.0.zip")
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -576,17 +568,18 @@ func GetAudioForTrack(workspaceDir string, track SongMetadataInfo) ([]float64, e
 	return nil, fmt.Errorf("track not found: %s", track.AudioFilename)
 }
 
-// ApplyEQCut simulates an EQ cut by applying a high-pass filter or low-pass filter.
 func ApplyEQCut(signal []float64, cutoffHz float64, filterType string) []float64 {
 	out := make([]float64, len(signal))
 	dt := 1.0 / float64(SpectralSpy.SAMPLE_RATE)
 	rc := 1.0 / (2 * math.Pi * cutoffHz)
-	alpha := dt / (rc + dt)
+	
+	alphaLP := dt / (rc + dt)
+	alphaHP := rc / (rc + dt)
 
 	if filterType == "lowpass" {
 		prev := 0.0
 		for i, x := range signal {
-			val := prev + alpha*(x-prev)
+			val := prev + alphaLP*(x-prev)
 			out[i] = val
 			prev = val
 		}
@@ -594,7 +587,7 @@ func ApplyEQCut(signal []float64, cutoffHz float64, filterType string) []float64
 		prevX := 0.0
 		prevY := 0.0
 		for i, x := range signal {
-			val := alpha * (prevY + x - prevX)
+			val := alphaHP * (prevY + x - prevX)
 			out[i] = val
 			prevX = x
 			prevY = val
@@ -605,7 +598,6 @@ func ApplyEQCut(signal []float64, cutoffHz float64, filterType string) []float64
 	return out
 }
 
-// ApplyRoomReverb simulates room reverb using a tapped delay line with feedback.
 func ApplyRoomReverb(signal []float64, delayMs []float64, decay []float64) []float64 {
 	out := make([]float64, len(signal))
 	copy(out, signal)
@@ -614,14 +606,12 @@ func ApplyRoomReverb(signal []float64, delayMs []float64, decay []float64) []flo
 		delaySamples := int(delayTime * float64(SpectralSpy.SAMPLE_RATE) / 1000.0)
 		g := decay[idx]
 		for i := delaySamples; i < len(signal); i++ {
-			out[i] += g * signal[i-delaySamples]
+			out[i] += g * out[i-delaySamples]
 		}
 	}
 	return out
 }
 
-// GenerateEvaluationQuerySet creates 50-100 random snippets of 3 to 10 seconds,
-// each augmented with distortions (white noise, EQ cuts, room reverb) from the given corpus.
 func GenerateEvaluationQuerySet(workspaceDir string, corpus []SongMetadataInfo, queryCount int) ([]EvaluationQuery, error) {
 	rng := rand.New(rand.NewSource(1337)) // Deterministic seed
 	queries := make([]EvaluationQuery, 0, queryCount)
@@ -649,7 +639,6 @@ func GenerateEvaluationQuerySet(workspaceDir string, corpus []SongMetadataInfo, 
 			continue
 		}
 
-		// Query duration: 3 to 10 seconds
 		durSec := 3.0 + rng.Float64()*7.0
 		durSamples := int(durSec * float64(SpectralSpy.SAMPLE_RATE))
 
@@ -668,7 +657,7 @@ func GenerateEvaluationQuerySet(workspaceDir string, corpus []SongMetadataInfo, 
 			distorted = snippet
 		case "whitenoise":
 			snr := 10.0 + rng.Float64()*20.0
-			distorted = AddNoise(snippet, snr)
+			distorted = AddNoise(snippet, snr, rng)
 		case "eq_lowpass":
 			distorted = ApplyEQCut(snippet, 1500.0, "lowpass")
 		case "eq_highpass":

@@ -1,0 +1,13 @@
+Category,Top-1,Precision,Recall,F1,FalseNeg
+Noise 30dB SNR,36.00,36.00,36.00,36.00,64.00
+Noise 20dB SNR,28.00,28.00,28.00,28.00,72.00
+Noise 15dB SNR,20.00,20.00,20.00,20.00,80.00
+Noise 10dB SNR,16.00,16.00,16.00,16.00,84.00
+Noise 5dB SNR,12.00,12.00,12.00,12.00,88.00
+Noise 0dB SNR,16.00,16.00,16.00,16.00,84.00
+Compression (Simulated 128kbps),32.00,32.00,32.00,32.00,68.00
+Compression (Simulated 64kbps),32.00,32.00,32.00,32.00,68.00
+Clip Length 1s,16.00,16.00,16.00,16.00,84.00
+Clip Length 2s,28.00,28.00,28.00,28.00,72.00
+Clip Length 3s,40.00,40.00,40.00,40.00,60.00
+Clip Length 5s,48.00,48.00,48.00,48.00,52.00

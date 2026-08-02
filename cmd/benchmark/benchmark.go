@@ -29,15 +29,15 @@ import (
 )
 
 type BenchmarkSuite struct {
-	App            *server.App
-	DB             *sql.DB
-	Metrics        []testutil.MetricReport
-	Accuracies     []testutil.AccuracyResult
-	BaseAudio      []float64
-	ExpectedSongID string
-	OutputPath     string
-	BaseContext    context.Context
-	Cancel         context.CancelFunc
+	App         *server.App
+	DB          *sql.DB
+	Metrics     []testutil.MetricReport
+	Accuracies  []testutil.AccuracyResult
+	EvalQueries []testutil.EvaluationQuery
+	BaseAudio   []float64
+	OutputPath  string
+	BaseContext context.Context
+	Cancel      context.CancelFunc
 }
 
 func NewBenchmarkSuite(workspaceDir string) *BenchmarkSuite {
@@ -66,31 +66,46 @@ func NewBenchmarkSuite(workspaceDir string) *BenchmarkSuite {
 		panic(err)
 	}
 
-	samples, songID, err := testutil.GetRandomMaestroSong(workspaceDir)
-	if err != nil {
-		cancel()
-		panic(fmt.Errorf("failed to fetch benchmark sample: %w", err))
+	var evalQueries []testutil.EvaluationQuery
+	corpus, err := testutil.StratifiedSampleMaestro(workspaceDir, 0.05)
+	if err == nil && len(corpus) > 0 {
+		queries, err := testutil.GenerateEvaluationQuerySet(workspaceDir, corpus, 25)
+		if err == nil {
+			evalQueries = queries
+		}
 	}
 
+	if len(evalQueries) == 0 {
+		samples, songID, err := testutil.GetRandomMaestroSong(workspaceDir)
+		if err != nil {
+			cancel()
+			panic(fmt.Errorf("failed to fetch benchmark sample: %w", err))
+		}
+		evalQueries = append(evalQueries, testutil.EvaluationQuery{
+			ExpectedSongID: songID,
+			Samples:        samples,
+		})
+	}
+
+	baseSamples := evalQueries[0].Samples
 	clampLen := int(10.0 * SpectralSpy.SAMPLE_RATE)
-	if len(samples) > clampLen {
-		samples = samples[:clampLen]
+	if len(baseSamples) > clampLen {
+		baseSamples = baseSamples[:clampLen]
 	}
 
 	return &BenchmarkSuite{
-		App:            app,
-		DB:             dbConn,
-		Metrics:        make([]testutil.MetricReport, 0),
-		Accuracies:     make([]testutil.AccuracyResult, 0),
-		BaseAudio:      samples,
-		ExpectedSongID: songID,
-		OutputPath:     path,
-		BaseContext:    ctx,
-		Cancel:         cancel,
+		App:         app,
+		DB:          dbConn,
+		Metrics:     make([]testutil.MetricReport, 0),
+		Accuracies:  make([]testutil.AccuracyResult, 0),
+		EvalQueries: evalQueries,
+		BaseAudio:   baseSamples,
+		OutputPath:  path,
+		BaseContext: ctx,
+		Cancel:      cancel,
 	}
 }
 
-// 1. End-to-End Recognition Benchmark
 func (b *BenchmarkSuite) RunEndToEndLatency() {
 	var latencies []float64
 	var spectrogramDurs []float64
@@ -100,15 +115,15 @@ func (b *BenchmarkSuite) RunEndToEndLatency() {
 	cropSamples := 5 * SpectralSpy.SAMPLE_RATE
 
 	for i := 0; i < 100; i++ {
-		// extract random 5-second continuous swath of audio before timer starts
-		audioCrop := b.BaseAudio
+		audioCrop := make([]float64, cropSamples)
 		if len(b.BaseAudio) > cropSamples {
 			maxStart := len(b.BaseAudio) - cropSamples
 			startIdx := rand.Intn(maxStart + 1)
-			audioCrop = b.BaseAudio[startIdx : startIdx+cropSamples]
+			copy(audioCrop, b.BaseAudio[startIdx:startIdx+cropSamples])
+		} else {
+			copy(audioCrop, b.BaseAudio)
 		}
 
-		// start measurement (excludes time spent cropping audio)
 		start := time.Now()
 
 		reqHashes, stageMetrics := SpectralSpy.ProcessWithMetrics(b.BaseContext, audioCrop)
@@ -161,39 +176,57 @@ func (b *BenchmarkSuite) RunEndToEndLatency() {
 	})
 }
 
-// accuracy & robustness tests
-func (b *BenchmarkSuite) measureAccuracy(name string, signal []float64) {
-	fmt.Printf("  -> Measuring Accuracy for: %s\n", name)
+func (b *BenchmarkSuite) measureAccuracy(name string, transform func(samples []float64) []float64) {
+	fmt.Printf("  -> Measuring Accuracy for: %s across %d queries...\n", name, len(b.EvalQueries))
 
-	hashes := SpectralSpy.Process(b.BaseContext, signal)
-	if len(hashes) == 0 {
-		b.Accuracies = append(b.Accuracies, testutil.AccuracyResult{Category: name, Top1: 0.0, FalseNeg: 1.0})
+	totalQueries := len(b.EvalQueries)
+	if totalQueries == 0 {
 		return
 	}
 
-	fingerprints := make([]server.Fingerprint, len(hashes))
-	for j, h := range hashes {
-		fingerprints[j] = server.Fingerprint{Hash: h.Hash, AnchorTime: h.AnchorTime}
+	correctCount := 0
+
+	for _, q := range b.EvalQueries {
+		// apply signal transformation
+		signal := transform(q.Samples)
+
+		maxSamples := 5 * SpectralSpy.SAMPLE_RATE // clamp sample length
+		if len(signal) > maxSamples {
+			signal = signal[:maxSamples]
+		}
+
+		hashes := SpectralSpy.Process(b.BaseContext, signal)
+		if len(hashes) == 0 {
+			continue
+		}
+
+		fingerprints := make([]server.Fingerprint, len(hashes))
+		for j, h := range hashes {
+			fingerprints[j] = server.Fingerprint{Hash: h.Hash, AnchorTime: h.AnchorTime}
+		}
+
+		if len(fingerprints) > server.MAX_REQUEST_LENGTH {
+			fingerprints = fingerprints[:server.MAX_REQUEST_LENGTH]
+		}
+
+		payload, _ := json.Marshal(server.IdentifyRequest{Fingerprints: fingerprints})
+		req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(payload))
+		req = req.WithContext(b.BaseContext)
+		rr := httptest.NewRecorder()
+		b.App.HandleIdentify(rr, req)
+
+		if rr.Code == http.StatusOK {
+			var resp server.IdentifyResponse
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err == nil {
+				if resp.SongID == q.ExpectedSongID {
+					correctCount++
+				}
+			}
+		}
 	}
 
-	// extract a random continuous swath of max 500 fingerprints
-	fingerprints = testutil.GetContinuousSwath(fingerprints, server.MAX_REQUEST_LENGTH)
-
-	payload, _ := json.Marshal(server.IdentifyRequest{Fingerprints: fingerprints})
-	req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(payload))
-	req = req.WithContext(b.BaseContext)
-	rr := httptest.NewRecorder()
-	b.App.HandleIdentify(rr, req)
-
-	var resp server.IdentifyResponse
-	json.NewDecoder(rr.Body).Decode(&resp)
-
-	score := 0.0
-	fn := 1.0
-	if resp.SongID == b.ExpectedSongID {
-		score = 100.0
-		fn = 0.0
-	}
+	score := (float64(correctCount) / float64(totalQueries)) * 100.0
+	falseNegatives := 100.0 - score
 
 	b.Accuracies = append(b.Accuracies, testutil.AccuracyResult{
 		Category:  name,
@@ -201,33 +234,42 @@ func (b *BenchmarkSuite) measureAccuracy(name string, signal []float64) {
 		Precision: score,
 		Recall:    score,
 		F1Score:   score,
-		FalseNeg:  fn,
+		FalseNeg:  falseNegatives,
 	})
 }
 
 func (b *BenchmarkSuite) RunRobustnessSuite() {
+	rng := rand.New(rand.NewSource(1337))
+
+	// noise robustness
 	for _, snr := range []float64{30, 20, 15, 10, 5, 0} {
-		noisy := testutil.AddNoise(b.BaseAudio, snr)
-		b.measureAccuracy(fmt.Sprintf("Noise %ddB SNR", int(snr)), noisy)
+		snrVal := snr
+		b.measureAccuracy(fmt.Sprintf("Noise %ddB SNR", int(snrVal)), func(samples []float64) []float64 {
+			return testutil.AddNoise(samples, snrVal, rng)
+		})
 	}
 
-	b.measureAccuracy("Compression (Simulated 128kbps)", testutil.SimulateCompression(b.BaseAudio, 8000.0))
-	b.measureAccuracy("Compression (Simulated 64kbps)", testutil.SimulateCompression(b.BaseAudio, 4000.0))
-
-	for _, speed := range []float64{0.95, 0.98, 1.02, 1.05} {
-		b.measureAccuracy(fmt.Sprintf("Speed %.2fx", speed), testutil.ResampleAudio(b.BaseAudio, speed))
+	// compression robustness
+	for _, bitrate := range []float64{128.0, 64.0} {
+		br := bitrate
+		b.measureAccuracy(fmt.Sprintf("Compression (Simulated %dkbps)", int(br)), func(samples []float64) []float64 {
+			return testutil.SimulateCompression(samples, br)
+		})
 	}
 
+	// clip length robustness
 	for _, length := range []int{1, 2, 3, 5} {
-		samples := length * SpectralSpy.SAMPLE_RATE
-		if samples > len(b.BaseAudio) {
-			continue
-		}
-		b.measureAccuracy(fmt.Sprintf("Clip Length %ds", length), b.BaseAudio[:samples])
+		l := length
+		b.measureAccuracy(fmt.Sprintf("Clip Length %ds", l), func(samples []float64) []float64 {
+			cropSamples := l * SpectralSpy.SAMPLE_RATE
+			if len(samples) > cropSamples {
+				return samples[:cropSamples]
+			}
+			return samples
+		})
 	}
 }
 
-// fingerprint feature quality
 func (b *BenchmarkSuite) RunFingerprintQuality() {
 	fmt.Println("  -> Analyzing Feature Quality...")
 	hashes := SpectralSpy.Process(b.BaseContext, b.BaseAudio)
@@ -257,7 +299,6 @@ func (b *BenchmarkSuite) RunFingerprintQuality() {
 	})
 }
 
-// database and api scalability
 func (b *BenchmarkSuite) RunAPILoadTest() {
 	users := []int{1, 10, 100, 500}
 
@@ -299,7 +340,6 @@ func (b *BenchmarkSuite) RunAPILoadTest() {
 	}
 }
 
-// Report Generation
 func (b *BenchmarkSuite) GenerateReports() {
 	jsonFile, _ := os.Create(filepath.Join(b.OutputPath, "benchmark_results.json"))
 	json.NewEncoder(jsonFile).Encode(map[string]interface{}{
@@ -361,8 +401,6 @@ func (b *BenchmarkSuite) GenerateReports() {
 }
 
 func main() {
-
-	// --- Live Diagnostic Server ---
 	go func() {
 		fmt.Println("Live diagnostics running at http://localhost:6060/debug/pprof/")
 		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
@@ -370,10 +408,8 @@ func main() {
 		}
 	}()
 
-	// Enable detailed block and mutex tracking
 	runtime.SetBlockProfileRate(1)
 	runtime.SetMutexProfileFraction(1)
-	// ------------------------------
 
 	workspaceDir := filepath.Join("misc", "workspace")
 

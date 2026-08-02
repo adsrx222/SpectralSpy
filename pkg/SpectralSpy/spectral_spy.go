@@ -3,10 +3,10 @@ package SpectralSpy
 import (
 	"context"
 	"encoding/binary"
-	//"fmt"
 	"math"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/zeebo/xxh3"
 	"gonum.org/v1/gonum/dsp/fourier"
@@ -21,7 +21,7 @@ const PEAK_NEIGHBORHOOD_FREQ = 5 // ±FFT bins
 
 const TARGET_ZONE_TIME_START = 2  // frames ahead where zone begins
 const TARGET_ZONE_TIME_END   = 7  // frames ahead where zone ends
-const TARGET_ZONE_FREQ_BINS  = 10 // ±FFT bins around anchor frequency bin
+const TARGET_ZONE_FREQ_BINS  = 8 // ±FFT bins around anchor frequency bin
 const MAX_FAN_OUT = 10
 
 var HANN_WINDOW = func() []float64 {
@@ -48,6 +48,14 @@ type SpectrogramData struct {
 	Mags  [][]float64
 	Times []float64
 	BinHz float64
+}
+
+// StageMetrics holds per-stage execution timing for profiling and benchmarking.
+type StageMetrics struct {
+	SpectrogramDuration time.Duration `json:"spectrogram_duration"`
+	PeakFindDuration    time.Duration `json:"peak_find_duration"`
+	HashGenDuration     time.Duration `json:"hash_gen_duration"`
+	TotalDuration       time.Duration `json:"total_duration"`
 }
 
 func buildSpectrogram(ctx context.Context, samples []float64) SpectrogramData {
@@ -327,4 +335,135 @@ func ProcessWithPeaks(ctx context.Context, samples []float64) ([]HashEntry, [][]
 	}
 
 	return generateHashEntries(ctx, rawPeaks), cleanPeaks
+}
+
+// generateHashEntriesWithParams is identical to generateHashEntries but accepts
+// custom target zone parameters (freqBins, timeEnd) for parameter optimization.
+func generateHashEntriesWithParams(ctx context.Context, peaks [][]ConstellationPoint, freqBins, timeEnd int) []HashEntry {
+	numFrames := len(peaks)
+	if numFrames == 0 {
+		return nil
+	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	framesPerWorker := (numFrames + numWorkers - 1) / numWorkers
+
+	results := make([][]HashEntry, numWorkers)
+	var wg sync.WaitGroup
+
+	for w := 0; w < numWorkers; w++ {
+		start := w * framesPerWorker
+		end := min(start+framesPerWorker, numFrames)
+
+		if start >= numFrames {
+			break
+		}
+
+		wg.Add(1)
+		go func(start, end, workerID int) {
+			defer wg.Done()
+
+			local := make([]HashEntry, 0, 1024)
+
+			for anchorT := start; anchorT < end; anchorT++ {
+				if ctx.Err() != nil {
+					return
+				}
+
+				tetherStart := anchorT + TARGET_ZONE_TIME_START
+				tetherEnd := min(anchorT+timeEnd, numFrames-1)
+
+				for _, anchor := range peaks[anchorT] {
+					minBin := anchor.BinIndex - freqBins
+					maxBin := anchor.BinIndex + freqBins
+
+					matches := 0
+
+				tetherSearch:
+					for tetherT := tetherStart; tetherT <= tetherEnd; tetherT++ {
+						for _, tether := range peaks[tetherT] {
+							if tether.BinIndex < minBin {
+								continue
+							}
+							if tether.BinIndex > maxBin {
+								break
+							}
+
+							local = append(local, HashEntry{
+								Hash:       hashPair(anchor, tether),
+								AnchorTime: anchor.Timestamp,
+							})
+
+							matches++
+							if matches >= MAX_FAN_OUT {
+								break tetherSearch
+							}
+						}
+					}
+				}
+			}
+
+			results[workerID] = local
+		}(start, end, w)
+	}
+
+	wg.Wait()
+
+	totalLen := 0
+	for _, r := range results {
+		totalLen += len(r)
+	}
+
+	all := make([]HashEntry, totalLen)
+	offset := 0
+	for _, r := range results {
+		copy(all[offset:], r)
+		offset += len(r)
+	}
+
+	return all
+}
+
+// ProcessWithMetrics runs the full fingerprinting pipeline and returns per-stage
+// execution times alongside the hash entries, enabling granular benchmarking.
+func ProcessWithMetrics(ctx context.Context, samples []float64) ([]HashEntry, StageMetrics) {
+	var metrics StageMetrics
+	totalStart := time.Now()
+
+	t0 := time.Now()
+	sg := buildSpectrogram(ctx, samples)
+	metrics.SpectrogramDuration = time.Since(t0)
+
+	t1 := time.Now()
+	peaks := findPeaks(ctx, sg)
+	metrics.PeakFindDuration = time.Since(t1)
+
+	t2 := time.Now()
+	entries := generateHashEntries(ctx, peaks)
+	metrics.HashGenDuration = time.Since(t2)
+
+	metrics.TotalDuration = time.Since(totalStart)
+	return entries, metrics
+}
+
+// ProcessWithParams runs the pipeline with custom target zone parameters
+// (freqBins, timeEnd) and returns per-stage timing for parameter optimization.
+func ProcessWithParams(ctx context.Context, samples []float64, freqBins, timeEnd int) ([]HashEntry, StageMetrics) {
+	var metrics StageMetrics
+	totalStart := time.Now()
+
+	t0 := time.Now()
+	sg := buildSpectrogram(ctx, samples)
+	metrics.SpectrogramDuration = time.Since(t0)
+
+	t1 := time.Now()
+	peaks := findPeaks(ctx, sg)
+	metrics.PeakFindDuration = time.Since(t1)
+
+	t2 := time.Now()
+	entries := generateHashEntriesWithParams(ctx, peaks, freqBins, timeEnd)
+	metrics.HashGenDuration = time.Since(t2)
+
+	metrics.TotalDuration = time.Since(totalStart)
+	return entries, metrics
 }

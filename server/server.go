@@ -99,15 +99,21 @@ func (i *IPRateLimiter) GetLimiter(ip string) *rate.Limiter {
 }
 
 // NewApp initializes and returns an app instance with configured dependencies
+// NewApp initializes and returns an app instance with configured dependencies
 func NewApp(dbConn *sql.DB, s3Client *s3.Client, bucket string, logger *slog.Logger) *App {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
+	var presignClient *s3.PresignClient
+	if s3Client != nil {
+		presignClient = s3.NewPresignClient(s3Client)
+	}
+
 	app := &App{
 		DB:               dbConn,
 		S3:               s3Client,
-		PresignClient:    s3.NewPresignClient(s3Client),
+		PresignClient:    presignClient,
 		Bucket:           bucket,
 		Logger:           logger,
 		Limiters:         NewIPRateLimiter(rate.Limit(5), 10), // 5 req/sec, burst 10
@@ -420,6 +426,11 @@ func (a *App) HandleIdentify(w http.ResponseWriter, r *http.Request) {
 
 // GET /songs/{id}/midi
 func (a *App) HandleGetMIDI(w http.ResponseWriter, r *http.Request) {
+	if a.PresignClient == nil {
+		a.respondError(w, http.StatusServiceUnavailable, "S3 storage is not configured")
+		return
+	}
+	
 	songID := chi.URLParam(r, "id")
 	if songID == "" {
 		a.respondError(w, http.StatusBadRequest, "Missing song ID")

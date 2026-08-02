@@ -594,3 +594,201 @@ func TestHashMatchClip(t *testing.T) {
 		fmt.Printf("... and %d more\n", len(matched)-200)
 	}
 }
+
+// ──────────────────────────────────────────────────────
+// RO2 — Strict Fan-Out Enforcement Tests
+// ──────────────────────────────────────────────────────
+
+// TestFanOut_SingleAnchorCapped places a single anchor with far more
+// reachable tethers than MAX_FAN_OUT and asserts that exactly MAX_FAN_OUT
+// hash entries are produced (strict cap, no over- or under-production).
+func TestFanOut_SingleAnchorCapped(t *testing.T) {
+	ctx := context.Background()
+	binHz := float64(SAMPLE_RATE) / float64(WINDOW_SIZE)
+
+	numFrames := TARGET_ZONE_TIME_END + 3
+	peaks := make([][]ConstellationPoint, numFrames)
+
+	// Single anchor at frame 0
+	anchorFreq := 2000.0
+	anchorBin := int(math.Round(anchorFreq / binHz))
+	peaks[0] = []ConstellationPoint{{
+		Timestamp: 0,
+		Frequency: float64(anchorBin) * binHz,
+		Magnitude: 1.0,
+		BinIndex:  anchorBin,
+	}}
+
+	// Fill every tether frame with (2*TARGET_ZONE_FREQ_BINS+1) peaks covering
+	// the full ± frequency band around the anchor.  Total reachable tethers =
+	// (TIME_END - TIME_START + 1) * (2*FREQ_BINS + 1) = 6 * 21 = 126 >> MAX_FAN_OUT.
+	for f := TARGET_ZONE_TIME_START; f <= TARGET_ZONE_TIME_END && f < numFrames; f++ {
+		var framePeaks []ConstellationPoint
+		for b := anchorBin - TARGET_ZONE_FREQ_BINS; b <= anchorBin+TARGET_ZONE_FREQ_BINS; b++ {
+			if b < 0 {
+				continue
+			}
+			framePeaks = append(framePeaks, ConstellationPoint{
+				Timestamp: float64(f),
+				Frequency: float64(b) * binHz,
+				Magnitude: 1.0,
+				BinIndex:  b,
+			})
+		}
+		peaks[f] = framePeaks
+	}
+
+	entries := generateHashEntries(ctx, peaks)
+
+	count := 0
+	for _, e := range entries {
+		if e.AnchorTime == 0 {
+			count++
+		}
+	}
+
+	potential := (TARGET_ZONE_TIME_END - TARGET_ZONE_TIME_START + 1) * (2*TARGET_ZONE_FREQ_BINS + 1)
+
+	if count > MAX_FAN_OUT {
+		t.Errorf("single anchor produced %d entries, exceeding MAX_FAN_OUT=%d (potential=%d)",
+			count, MAX_FAN_OUT, potential)
+	}
+	if count != MAX_FAN_OUT {
+		t.Errorf("expected exactly MAX_FAN_OUT=%d entries when %d tethers available, got %d",
+			MAX_FAN_OUT, potential, count)
+	}
+}
+
+// TestFanOut_DensePeaks_RespectsCap creates multiple anchors per frame with
+// dense tethers and verifies the per-frame entry count never exceeds
+// anchorsPerFrame * MAX_FAN_OUT.
+func TestFanOut_DensePeaks_RespectsCap(t *testing.T) {
+	ctx := context.Background()
+	binHz := float64(SAMPLE_RATE) / float64(WINDOW_SIZE)
+
+	numFrames := 20
+	peaksPerFrame := 5
+	peaks := make([][]ConstellationPoint, numFrames)
+
+	for f := 0; f < numFrames; f++ {
+		peaks[f] = make([]ConstellationPoint, peaksPerFrame)
+		for p := 0; p < peaksPerFrame; p++ {
+			bin := 50 + p
+			peaks[f][p] = ConstellationPoint{
+				Timestamp: float64(f),
+				Frequency: float64(bin) * binHz,
+				Magnitude: 1.0,
+				BinIndex:  bin,
+			}
+		}
+	}
+
+	entries := generateHashEntries(ctx, peaks)
+
+	perFrame := make(map[float64]int)
+	for _, e := range entries {
+		perFrame[e.AnchorTime]++
+	}
+
+	for ts, count := range perFrame {
+		maxAllowed := peaksPerFrame * MAX_FAN_OUT
+		if count > maxAllowed {
+			t.Errorf("frame t=%.0f: %d entries exceeds max %d (%d anchors × %d fan-out)",
+				ts, count, maxAllowed, peaksPerFrame, MAX_FAN_OUT)
+		}
+	}
+}
+
+// TestFanOut_SparseBelowCap creates fewer reachable tethers than MAX_FAN_OUT
+// and verifies all of them are produced (the cap does not suppress valid pairs).
+func TestFanOut_SparseBelowCap(t *testing.T) {
+	ctx := context.Background()
+	binHz := float64(SAMPLE_RATE) / float64(WINDOW_SIZE)
+
+	numFrames := TARGET_ZONE_TIME_END + 3
+	peaks := make([][]ConstellationPoint, numFrames)
+
+	anchorBin := 100
+	peaks[0] = []ConstellationPoint{{
+		Timestamp: 0,
+		Frequency: float64(anchorBin) * binHz,
+		Magnitude: 1.0,
+		BinIndex:  anchorBin,
+	}}
+
+	// Place exactly 3 tethers (well below MAX_FAN_OUT=10)
+	tethersPlaced := 0
+	for f := TARGET_ZONE_TIME_START; f <= TARGET_ZONE_TIME_END && f < numFrames && tethersPlaced < 3; f++ {
+		peaks[f] = []ConstellationPoint{{
+			Timestamp: float64(f),
+			Frequency: float64(anchorBin) * binHz,
+			Magnitude: 1.0,
+			BinIndex:  anchorBin,
+		}}
+		tethersPlaced++
+	}
+
+	entries := generateHashEntries(ctx, peaks)
+
+	count := 0
+	for _, e := range entries {
+		if e.AnchorTime == 0 {
+			count++
+		}
+	}
+
+	if count != 3 {
+		t.Errorf("expected 3 entries for %d reachable tethers (below cap=%d), got %d",
+			3, MAX_FAN_OUT, count)
+	}
+}
+
+// TestFanOut_ExactlyAtCap verifies that when exactly MAX_FAN_OUT tethers
+// are reachable, all are produced — the cap is an inclusive ceiling.
+func TestFanOut_ExactlyAtCap(t *testing.T) {
+	ctx := context.Background()
+	binHz := float64(SAMPLE_RATE) / float64(WINDOW_SIZE)
+
+	numFrames := TARGET_ZONE_TIME_END + 3
+	peaks := make([][]ConstellationPoint, numFrames)
+
+	anchorBin := 150
+	peaks[0] = []ConstellationPoint{{
+		Timestamp: 0,
+		Frequency: float64(anchorBin) * binHz,
+		Magnitude: 1.0,
+		BinIndex:  anchorBin,
+	}}
+
+	// Distribute exactly MAX_FAN_OUT tethers across the target zone frames
+	placed := 0
+	for f := TARGET_ZONE_TIME_START; f <= TARGET_ZONE_TIME_END && f < numFrames && placed < MAX_FAN_OUT; f++ {
+		var framePeaks []ConstellationPoint
+		// Place 2 tethers per frame until we have MAX_FAN_OUT total
+		for p := 0; p < 2 && placed < MAX_FAN_OUT; p++ {
+			b := anchorBin + p
+			framePeaks = append(framePeaks, ConstellationPoint{
+				Timestamp: float64(f),
+				Frequency: float64(b) * binHz,
+				Magnitude: 1.0,
+				BinIndex:  b,
+			})
+			placed++
+		}
+		peaks[f] = framePeaks
+	}
+
+	entries := generateHashEntries(ctx, peaks)
+
+	count := 0
+	for _, e := range entries {
+		if e.AnchorTime == 0 {
+			count++
+		}
+	}
+
+	if count != MAX_FAN_OUT {
+		t.Errorf("expected exactly MAX_FAN_OUT=%d entries when exactly %d tethers available, got %d",
+			MAX_FAN_OUT, MAX_FAN_OUT, count)
+	}
+}

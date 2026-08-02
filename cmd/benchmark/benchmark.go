@@ -43,7 +43,7 @@ type BenchmarkSuite struct {
 func NewBenchmarkSuite(workspaceDir string) *BenchmarkSuite {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Hour)
 
-	dbPath := filepath.Join(workspaceDir, "hashes.sqlite")
+	dbPath := filepath.Join(workspaceDir, "workspace_hash.sqlite")
 	dbConn := testutil.SetupTestDB(nil, dbPath)
 
 	cfg, err := config.LoadDefaultConfig(ctx,
@@ -93,6 +93,10 @@ func NewBenchmarkSuite(workspaceDir string) *BenchmarkSuite {
 // 1. End-to-End Recognition Benchmark
 func (b *BenchmarkSuite) RunEndToEndLatency() {
 	var latencies []float64
+	var spectrogramDurs []float64
+	var peakFindDurs []float64
+	var hashGenDurs []float64
+
 	cropSamples := 5 * SpectralSpy.SAMPLE_RATE
 
 	for i := 0; i < 100; i++ {
@@ -107,7 +111,7 @@ func (b *BenchmarkSuite) RunEndToEndLatency() {
 		// start measurement (excludes time spent cropping audio)
 		start := time.Now()
 
-		reqHashes := SpectralSpy.Process(b.BaseContext, audioCrop)
+		reqHashes, stageMetrics := SpectralSpy.ProcessWithMetrics(b.BaseContext, audioCrop)
 
 		fingerprints := make([]server.Fingerprint, len(reqHashes))
 		for j, h := range reqHashes {
@@ -121,16 +125,39 @@ func (b *BenchmarkSuite) RunEndToEndLatency() {
 		rr := httptest.NewRecorder()
 		b.App.HandleIdentify(rr, req)
 
-		dur := float64(time.Since(start).Milliseconds())
+		dur := float64(time.Since(start).Nanoseconds()) / 1e6
 		latencies = append(latencies, dur)
+		spectrogramDurs = append(spectrogramDurs, float64(stageMetrics.SpectrogramDuration.Nanoseconds())/1e6)
+		peakFindDurs = append(peakFindDurs, float64(stageMetrics.PeakFindDuration.Nanoseconds())/1e6)
+		hashGenDurs = append(hashGenDurs, float64(stageMetrics.HashGenDuration.Nanoseconds())/1e6)
 
-		fmt.Printf("[%d / 100]  -> %.2f ms\n", i+1, dur)
+		fmt.Printf("[%d / 100]  -> %.2f ms (spectrogram: %.2f ms, peak: %.2f ms, hash: %.2f ms)\n",
+			i+1, dur,
+			float64(stageMetrics.SpectrogramDuration.Nanoseconds())/1e6,
+			float64(stageMetrics.PeakFindDuration.Nanoseconds())/1e6,
+			float64(stageMetrics.HashGenDuration.Nanoseconds())/1e6,
+		)
 	}
 
 	b.Metrics = append(b.Metrics, testutil.MetricReport{
 		Name:     "End-To-End Latency (ms)",
 		Category: "Latency",
 		Stats:    testutil.CalculateStats(latencies),
+	})
+	b.Metrics = append(b.Metrics, testutil.MetricReport{
+		Name:     "Spectrogram Duration (ms)",
+		Category: "Latency",
+		Stats:    testutil.CalculateStats(spectrogramDurs),
+	})
+	b.Metrics = append(b.Metrics, testutil.MetricReport{
+		Name:     "Peak-Finding Duration (ms)",
+		Category: "Latency",
+		Stats:    testutil.CalculateStats(peakFindDurs),
+	})
+	b.Metrics = append(b.Metrics, testutil.MetricReport{
+		Name:     "Hash Generation Duration (ms)",
+		Category: "Latency",
+		Stats:    testutil.CalculateStats(hashGenDurs),
 	})
 }
 

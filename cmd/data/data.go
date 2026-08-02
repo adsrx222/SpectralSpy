@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -78,7 +79,7 @@ func main() {
 
 // update turso db via local sqlite + option to turso import
 func UpdateTursoDB(workspaceDir string, songMap map[string]data.SongMetadata) error {
-	sqlitePath := "misc/workspacehashes.sqlite"
+	sqlitePath := filepath.Join(workspaceDir, "workspace_hash.sqlite")
 
 	// remove old local database file if present
 	_ = os.Remove(sqlitePath)

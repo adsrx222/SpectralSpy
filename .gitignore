@@ -1,4 +1,5 @@
 .env
 misc/testdata
 misc/workspace
-benchmark.md
+checklist.md
+design.md

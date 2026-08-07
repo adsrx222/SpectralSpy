@@ -73,7 +73,7 @@ func addNoise(noiseLevel float64, samples []float64, rng *rand.Rand) []float64 {
 	return noisy
 }
 
-func hashesFrom(entries []HashEntry) []uint64 {
+func hashesFrom(entries []Fingerprint) []uint64 {
 	out := make([]uint64, len(entries))
 	for i, e := range entries {
 		out[i] = e.Hash
@@ -81,7 +81,7 @@ func hashesFrom(entries []HashEntry) []uint64 {
 	return out
 }
 
-func hashSet(entries []HashEntry) map[uint64]struct{} {
+func hashSet(entries []Fingerprint) map[uint64]struct{} {
 	m := make(map[uint64]struct{}, len(entries))
 	for _, e := range entries {
 		m[e.Hash] = struct{}{}
@@ -91,7 +91,7 @@ func hashSet(entries []HashEntry) map[uint64]struct{} {
 
 // findPeaks()
 
-func makeSpectrogram(samples []float64) SpectrogramData {
+func makeSpectrogram(samples []float64) Spectrogram {
 	ctx := context.Background()
 	return buildSpectrogram(ctx, samples)
 }
@@ -534,7 +534,7 @@ func TestGenerateHashes(t *testing.T) {
 // Test Matching
 
 func TestHashMatchClip(t *testing.T) {
-	samples, err := loadMP3("../../misc/testdata/001.mp3")
+	samples, err := loadMP3("../misc/testdata/001.mp3")
 	if err != nil {
 		t.Fatalf("failed to load mp3: %v", err)
 	}
@@ -769,5 +769,243 @@ func TestFanOut_ExactlyAtCap(t *testing.T) {
 	if count != MAX_FAN_OUT {
 		t.Errorf("expected exactly MAX_FAN_OUT=%d entries when exactly %d tethers available, got %d",
 			MAX_FAN_OUT, MAX_FAN_OUT, count)
+	}
+}
+
+func TestHashIdentification(t *testing.T) {
+	const (
+		numTracks  = 5
+		clipLen    = SAMPLE_RATE * 5
+		noiseLevel = 0.1
+	)
+
+	// ── load all tracks and build database ─────────────────────────────────
+	type trackMeta struct {
+		name       string
+		fingerprints []Fingerprint
+	}
+
+	tracks := make([]trackMeta, numTracks)
+	db := make(map[uint64][]DBEntry) // hash → []DBEntry{SongID, AnchorTime}
+
+	for i := 0; i < numTracks; i++ {
+		path := fmt.Sprintf("../misc/testdata/%03d.mp3", i+1)
+		samples, err := loadMP3(path)
+		if err != nil {
+			t.Fatalf("failed to load %s: %v", path, err)
+		}
+
+		fps := Process(context.Background(), samples)
+		tracks[i] = trackMeta{
+			name:         path,
+			fingerprints: fps,
+		}
+
+		// Add to database
+		songID := fmt.Sprintf("%03d", i+1)
+		for _, fp := range fps {
+			db[fp.Hash] = append(db[fp.Hash], DBEntry{
+				Hash:       fp.Hash,
+				SongID:     songID,
+				AnchorTime: fp.AnchorTime,
+			})
+		}
+
+		t.Logf("loaded %-20s → %d fingerprints", path, len(fps))
+	}
+
+	// ── build a global hash → []trackIndex map to detect cross-track collisions
+	type hashEntry struct {
+		tracks []int
+	}
+	global := make(map[uint64]*hashEntry)
+
+	for i, tr := range tracks {
+		for _, fp := range tr.fingerprints {
+			e, ok := global[fp.Hash]
+			if !ok {
+				e = &hashEntry{}
+				global[fp.Hash] = e
+			}
+			// only record each track index once per hash
+			found := false
+			for _, idx := range e.tracks {
+				if idx == i {
+					found = true
+					break
+				}
+			}
+			if !found {
+				e.tracks = append(e.tracks, i)
+			}
+		}
+	}
+
+	// ── pick a random track and clip ─────────────────────────────────────────
+	seed := time.Now().UnixNano()
+	rng := rand.New(rand.NewSource(seed))
+
+	targetIdx := rng.Intn(numTracks)
+	targetPath := fmt.Sprintf("../misc/testdata/%03d.mp3", targetIdx+1)
+
+	allSamples, err := loadMP3(targetPath)
+	if err != nil {
+		t.Fatalf("failed to reload %s: %v", targetPath, err)
+	}
+	if len(allSamples) < clipLen {
+		t.Fatalf("%s is shorter than 5 seconds", targetPath)
+	}
+
+	maxStart := len(allSamples) - clipLen
+	startSample := rng.Intn(maxStart + 1)
+	endSample := startSample + clipLen
+
+	startSec := float64(startSample) / SAMPLE_RATE
+	endSec := float64(endSample) / SAMPLE_RATE
+
+	t.Logf("seed         : %d", seed)
+	t.Logf("target track : %s (track %d)", targetPath, targetIdx+1)
+	t.Logf("clip window  : %.3fs – %.3fs", startSec, endSec)
+	t.Logf("noise level  : %.0f%% of peak amplitude", noiseLevel*100)
+
+	// ── clean baseline for the chosen clip ───────────────────────────────────
+	cleanClip := allSamples[startSample:endSample]
+	cleanFps := Process(context.Background(), cleanClip)
+
+	if len(cleanFps) == 0 {
+		t.Fatal("clean clip produced no fingerprints")
+	}
+
+	// ── noisy query clip ─────────────────────────────────────────────────────
+	noisyClip := addNoise(noiseLevel, cleanClip, rng)
+	queryFps := Process(context.Background(), noisyClip)
+
+	// ── use MatchFingerprints for identification ──────────────────────────────
+	bestSongID, bestScore, matchOffset, confidence := MatchFingerprints(queryFps, db)
+
+	// Convert songID back to track index
+	var bestIdx int
+	if bestSongID != "" {
+		fmt.Sscanf(bestSongID, "%03d", &bestIdx)
+		bestIdx-- // convert from 1-indexed to 0-indexed
+	}
+
+	// ── bucket analysis: correct/ambiguous/wrong/unmatched ───────────────────
+	var (
+		correct   []uint64
+		ambiguous []uint64
+		wrong     []uint64
+		unmatched []uint64
+	)
+
+	for _, fp := range queryFps {
+		e, ok := global[fp.Hash]
+		if !ok {
+			unmatched = append(unmatched, fp.Hash)
+			continue
+		}
+
+		inTarget := false
+		inOther := false
+		for _, idx := range e.tracks {
+			if idx == targetIdx {
+				inTarget = true
+			} else {
+				inOther = true
+			}
+		}
+
+		switch {
+		case inTarget && !inOther:
+			correct = append(correct, fp.Hash)
+		case inTarget && inOther:
+			ambiguous = append(ambiguous, fp.Hash)
+		case !inTarget && inOther:
+			wrong = append(wrong, fp.Hash)
+		}
+	}
+
+	total := len(queryFps)
+	pct := func(n int) float64 {
+		if total == 0 {
+			return 0
+		}
+		return float64(n) / float64(total) * 100
+	}
+
+	// survival: how many clean-clip fingerprints reappeared in the noisy query
+	cleanSet := make(map[uint64]struct{}, len(cleanFps))
+	for _, fp := range cleanFps {
+		cleanSet[fp.Hash] = struct{}{}
+	}
+	survived := 0
+	for _, fp := range queryFps {
+		if _, ok := cleanSet[fp.Hash]; ok {
+			survived++
+		}
+	}
+	survivalPct := float64(survived) / float64(len(cleanFps)) * 100
+
+	// ── per-track vote count (raw histogram) ─────────────────────────────────
+	votes := make([]int, numTracks)
+	for _, fp := range queryFps {
+		if e, ok := global[fp.Hash]; ok {
+			for _, idx := range e.tracks {
+				votes[idx]++
+			}
+		}
+	}
+
+	identified := bestIdx == targetIdx
+
+	// ── report ───────────────────────────────────────────────────────────────
+	fmt.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Printf("Target track      : %s\n", targetPath)
+	fmt.Printf("Clip              : %.3fs – %.3fs\n", startSec, endSec)
+	fmt.Printf("Noise             : %.0f%%\n\n", noiseLevel*100)
+
+	fmt.Printf("Clean fingerprints: %d\n", len(cleanFps))
+	fmt.Printf("Query fingerprints: %d\n", total)
+	fmt.Printf("FP survival       : %d / %d (%.2f%%)\n\n",
+		survived, len(cleanFps), survivalPct)
+
+	fmt.Printf("Correct           : %d (%.2f%%) — target track only\n",
+		len(correct), pct(len(correct)))
+	fmt.Printf("Ambiguous         : %d (%.2f%%) — target + other track(s)\n",
+		len(ambiguous), pct(len(ambiguous)))
+	fmt.Printf("Wrong             : %d (%.2f%%) — other track(s) only\n",
+		len(wrong), pct(len(wrong)))
+	fmt.Printf("Unmatched         : %d (%.2f%%) — not in any track\n",
+		len(unmatched), pct(len(unmatched)))
+
+	fmt.Printf("\nOffset-binned matching (via MatchFingerprints):\n")
+	fmt.Printf("Best track        : %s (track %d)\n", bestSongID, bestIdx+1)
+	fmt.Printf("Best score        : %d votes\n", bestScore)
+	fmt.Printf("Match offset      : %.2f seconds\n", matchOffset)
+	fmt.Printf("Confidence Ratio      : %.2f\n\n", confidence)
+
+	fmt.Printf("Per-track raw vote counts:\n")
+	for i, v := range votes {
+		marker := ""
+		if i == targetIdx {
+			marker = " ← target"
+		}
+		if i == bestIdx && bestIdx != targetIdx {
+			marker = " ← identified (wrong)"
+		}
+		fmt.Printf("  testdata/%03d.mp3 : %d votes%s\n", i+1, v, marker)
+	}
+
+	if identified {
+		fmt.Printf("\n✓ Correctly identified as %s\n", targetPath)
+	} else {
+		fmt.Printf("\n✗ Misidentified as testdata/%03d.mp3 (score %d)\n",
+			bestIdx+1, bestScore)
+	}
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+	if !identified {
+		t.Errorf("identification failed: expected track %d, got track %d",
+			targetIdx+1, bestIdx+1)
 	}
 }

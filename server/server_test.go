@@ -17,13 +17,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"spectralspy/server"
-	"spectralspy/testutil"
+	"github.com/adsrx222/SpectralSpy/SpectralSpy"
+	"github.com/adsrx222/SpectralSpy/server"
+	"github.com/adsrx222/SpectralSpy/testutil"
 )
 
 func setupTestApp(t *testing.T) (*server.App, *httptest.Server) {
@@ -112,8 +113,11 @@ func TestHandleIdentify_Success(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
+	r := gin.New()
+	r.POST("/api/v1/identify", app.HandleIdentify)
+
 	reqPayload := server.IdentifyRequest{
-		Fingerprints: []server.Fingerprint{
+		Fingerprints: []SpectralSpy.Fingerprint{
 			{Hash: 101, AnchorTime: 0.0},
 			{Hash: 102, AnchorTime: 100.0},
 		},
@@ -124,7 +128,7 @@ func TestHandleIdentify_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	app.HandleIdentify(rr, req)
+	r.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d. Body: %s", rr.Code, rr.Body.String())
@@ -148,6 +152,9 @@ func TestHandleIdentify_ValidationErrors(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
+	r := gin.New()
+	r.POST("/api/v1/identify", app.HandleIdentify)
+
 	tests := []struct {
 		name         string
 		payload      server.IdentifyRequest
@@ -155,18 +162,18 @@ func TestHandleIdentify_ValidationErrors(t *testing.T) {
 	}{
 		{
 			name:         "Empty Fingerprints",
-			payload:      server.IdentifyRequest{Fingerprints: []server.Fingerprint{}},
+			payload:      server.IdentifyRequest{Fingerprints: []SpectralSpy.Fingerprint{}},
 			expectedCode: http.StatusBadRequest,
 		},
 		{
 			name:         "Exceeds Fingerprint Limit",
-			payload:      server.IdentifyRequest{Fingerprints: make([]server.Fingerprint, 501)},
+			payload:      server.IdentifyRequest{Fingerprints: make([]SpectralSpy.Fingerprint, 500001)},
 			expectedCode: http.StatusBadRequest,
 		},
 		{
 			name: "No Match In DB",
 			payload: server.IdentifyRequest{
-				Fingerprints: []server.Fingerprint{{Hash: 99999, AnchorTime: 0}},
+				Fingerprints: []SpectralSpy.Fingerprint{{Hash: 99999, AnchorTime: 0}},
 			},
 			expectedCode: http.StatusNotFound,
 		},
@@ -176,9 +183,10 @@ func TestHandleIdentify_ValidationErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body, _ := json.Marshal(tc.payload)
 			req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 
-			app.HandleIdentify(rr, req)
+			r.ServeHTTP(rr, req)
 
 			if rr.Code != tc.expectedCode {
 				t.Errorf("Expected code %d, got %d", tc.expectedCode, rr.Code)
@@ -192,11 +200,15 @@ func TestHandleIdentify_MalformedJSON(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
+	r := gin.New()
+	r.POST("/api/v1/identify", app.HandleIdentify)
+
 	badJSON := []byte(`{"fingerprints": [{"hash": 101, "anchor_time": }]}`)
 	req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(badJSON))
+	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	app.HandleIdentify(rr, req)
+	r.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400 Bad Request for malformed JSON, got %d", rr.Code)
@@ -208,14 +220,18 @@ func TestHandleIdentify_ExceedsMaxBytes(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
+	r := gin.New()
+	r.POST("/api/v1/identify", app.HandleIdentify)
+
 	largePadding := strings.Repeat("a", 110*1024)
 	payload := map[string]string{"padding": largePadding}
 	body, _ := json.Marshal(payload)
 
 	req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	app.HandleIdentify(rr, req)
+	r.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request when exceeding max body bytes, got %d", rr.Code)
@@ -227,18 +243,22 @@ func TestHandleIdentify_LargeUint64Hash(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
+	r := gin.New()
+	r.POST("/api/v1/identify", app.HandleIdentify)
+
 	maxHash := uint64(18446744073709551615)
 	reqPayload := server.IdentifyRequest{
-		Fingerprints: []server.Fingerprint{
+		Fingerprints: []SpectralSpy.Fingerprint{
 			{Hash: maxHash, AnchorTime: 0.0},
 		},
 	}
 
 	body, _ := json.Marshal(reqPayload)
 	req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	app.HandleIdentify(rr, req)
+	r.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected status 200 for large uint64 hash, got %d. Body: %s", rr.Code, rr.Body.String())
@@ -257,8 +277,11 @@ func TestHandleIdentify_DuplicateHashes(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
+	r := gin.New()
+	r.POST("/api/v1/identify", app.HandleIdentify)
+
 	reqPayload := server.IdentifyRequest{
-		Fingerprints: []server.Fingerprint{
+		Fingerprints: []SpectralSpy.Fingerprint{
 			{Hash: 101, AnchorTime: 0.0},
 			{Hash: 101, AnchorTime: 2048.0},
 		},
@@ -266,9 +289,10 @@ func TestHandleIdentify_DuplicateHashes(t *testing.T) {
 
 	body, _ := json.Marshal(reqPayload)
 	req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	app.HandleIdentify(rr, req)
+	r.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected status 200 for duplicate hash query, got %d", rr.Code)
@@ -280,8 +304,8 @@ func TestHandleGetMIDI_CompleteRedirect(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
-	r := chi.NewRouter()
-	r.Get("/songs/{id}/midi", app.HandleGetMIDI)
+	r := gin.New()
+	r.GET("/songs/:id/midi", app.HandleGetMIDI)
 
 	req := httptest.NewRequest("GET", "/songs/songA/midi", nil)
 	rr := httptest.NewRecorder()
@@ -341,23 +365,38 @@ func TestHandleGetConstellation_CompleteRedirect(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
-	r := chi.NewRouter()
-	r.Get("/songs/{id}/constellation", app.HandleGetConstellation)
+	r := gin.New()
+	r.GET("/songs/:id/constellation", app.HandleGetConstellation)
 
 	apiServer := httptest.NewServer(r)
 	defer apiServer.Close()
 
-	resp, err := http.Get(apiServer.URL + "/songs/songA/constellation")
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // Don't automatically follow redirect in client to test the 302/200 flow properly
+		},
+	}
+
+	resp, err := client.Get(apiServer.URL + "/songs/songA/constellation")
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected final status 200 OK after following redirect, got %d", resp.StatusCode)
+	// Since we captured last response or followed it, let's verify redirect behavior or query the S3 mock directly if needed.
+	// Alternatively, hit the server without the redirect client interceptor if following through:
+	apiClientNormal := http.DefaultClient
+	respNormal, err := apiClientNormal.Get(apiServer.URL + "/songs/songA/constellation")
+	if err != nil {
+		t.Fatalf("Failed to send request: %v", err)
+	}
+	defer respNormal.Body.Close()
+
+	if respNormal.StatusCode != http.StatusOK {
+		t.Fatalf("Expected final status 200 OK after following redirect, got %d", respNormal.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(respNormal.Body)
 	if err != nil {
 		t.Fatalf("Failed to read body: %v", err)
 	}
@@ -374,10 +413,10 @@ func TestRateLimitMiddleware_RemoteAddrWithoutPort(t *testing.T) {
 
 	app.Limiters = server.NewIPRateLimiter(rate.Limit(1), 1)
 
-	r := chi.NewRouter()
-	r.Use(app.RateLimitMiddleware)
-	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+	r := gin.New()
+	r.Use(app.RateLimitMiddleware())
+	r.GET("/ping", func(c *gin.Context) {
+		c.Status(http.StatusOK)
 	})
 
 	req := httptest.NewRequest("GET", "/ping", nil)
@@ -395,10 +434,10 @@ func TestLoggerMiddleware(t *testing.T) {
 	defer app.DB.Close()
 	defer s3Server.Close()
 
-	r := chi.NewRouter()
-	r.Use(app.LoggerMiddleware)
-	r.Get("/test-logger", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
+	r := gin.New()
+	r.Use(app.LoggerMiddleware())
+	r.GET("/test-logger", func(c *gin.Context) {
+		c.Status(http.StatusAccepted)
 	})
 
 	req := httptest.NewRequest("GET", "/test-logger", nil)

@@ -18,13 +18,14 @@ import (
 	"sync"
 	"time"
 
-	"spectralspy/pkg/SpectralSpy"
-	"spectralspy/server"
-	"spectralspy/testutil"
+	"github.com/adsrx222/SpectralSpy/SpectralSpy"
+	"github.com/adsrx222/SpectralSpy/server"
+	"github.com/adsrx222/SpectralSpy/testutil"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -114,6 +115,9 @@ func (b *BenchmarkSuite) RunEndToEndLatency() {
 
 	cropSamples := 5 * SpectralSpy.SAMPLE_RATE
 
+	r := gin.New()
+	r.POST("/api/v1/identify", b.App.HandleIdentify)
+
 	for i := 0; i < 100; i++ {
 		audioCrop := make([]float64, cropSamples)
 		if len(b.BaseAudio) > cropSamples {
@@ -128,17 +132,18 @@ func (b *BenchmarkSuite) RunEndToEndLatency() {
 
 		reqHashes, stageMetrics := SpectralSpy.ProcessWithMetrics(b.BaseContext, audioCrop)
 
-		fingerprints := make([]server.Fingerprint, len(reqHashes))
+		fingerprints := make([]SpectralSpy.Fingerprint, len(reqHashes))
 		for j, h := range reqHashes {
-			fingerprints[j] = server.Fingerprint{Hash: h.Hash, AnchorTime: h.AnchorTime}
+			fingerprints[j] = SpectralSpy.Fingerprint{Hash: h.Hash, AnchorTime: h.AnchorTime}
 		}
 
 		payload, _ := json.Marshal(server.IdentifyRequest{Fingerprints: fingerprints})
 
 		req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
 		req = req.WithContext(b.BaseContext)
 		rr := httptest.NewRecorder()
-		b.App.HandleIdentify(rr, req)
+		r.ServeHTTP(rr, req)
 
 		dur := float64(time.Since(start).Nanoseconds()) / 1e6
 		latencies = append(latencies, dur)
@@ -185,6 +190,8 @@ func (b *BenchmarkSuite) measureAccuracy(name string, transform func(samples []f
 	}
 
 	correctCount := 0
+	r := gin.New()
+	r.POST("/api/v1/identify", b.App.HandleIdentify)
 
 	for _, q := range b.EvalQueries {
 		// apply signal transformation
@@ -200,9 +207,9 @@ func (b *BenchmarkSuite) measureAccuracy(name string, transform func(samples []f
 			continue
 		}
 
-		fingerprints := make([]server.Fingerprint, len(hashes))
+		fingerprints := make([]SpectralSpy.Fingerprint, len(hashes))
 		for j, h := range hashes {
-			fingerprints[j] = server.Fingerprint{Hash: h.Hash, AnchorTime: h.AnchorTime}
+			fingerprints[j] = SpectralSpy.Fingerprint{Hash: h.Hash, AnchorTime: h.AnchorTime}
 		}
 
 		if len(fingerprints) > server.MAX_REQUEST_LENGTH {
@@ -211,9 +218,10 @@ func (b *BenchmarkSuite) measureAccuracy(name string, transform func(samples []f
 
 		payload, _ := json.Marshal(server.IdentifyRequest{Fingerprints: fingerprints})
 		req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
 		req = req.WithContext(b.BaseContext)
 		rr := httptest.NewRecorder()
-		b.App.HandleIdentify(rr, req)
+		r.ServeHTTP(rr, req)
 
 		if rr.Code == http.StatusOK {
 			var resp server.IdentifyResponse
@@ -304,6 +312,9 @@ func (b *BenchmarkSuite) RunAPILoadTest() {
 
 	payload := `{"fingerprints": [{"hash": 101, "anchor_time": 0.0}]}`
 
+	r := gin.New()
+	r.POST("/api/v1/identify", b.App.HandleIdentify)
+
 	for _, concurrent := range users {
 		fmt.Printf("  -> Testing Load Concurrency: %d Users...\n", concurrent)
 
@@ -318,11 +329,12 @@ func (b *BenchmarkSuite) RunAPILoadTest() {
 				start := time.Now()
 
 				req := httptest.NewRequest("POST", "/api/v1/identify", bytes.NewReader([]byte(payload)))
+				req.Header.Set("Content-Type", "application/json")
 				req.RemoteAddr = fmt.Sprintf("192.168.1.%d:80", rand.Intn(250))
 				req = req.WithContext(b.BaseContext)
 
 				rr := httptest.NewRecorder()
-				b.App.HandleIdentify(rr, req)
+				r.ServeHTTP(rr, req)
 
 				dur := float64(time.Since(start).Milliseconds())
 				mu.Lock()

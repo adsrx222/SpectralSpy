@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Audio Fingerprinter</title>
+    <script src="wasm_exec.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2rem auto; padding: 0 1rem; }
+        .hidden { display: none; }
+        #diagnostics { background: #f4f4f4; padding: 1rem; border-radius: 8px; margin-top: 1rem; }
+        button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+    </style>
+    <script>
+        let currentFingerprints = null;
+
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then((result) => {
+            go.run(result.instance);
+            console.log("WASM Module Loaded Successfully");
+        }).catch(err => console.error("Error loading WASM:", err));
+
+        async function decodeAudioTo44100Mono(arrayBuffer) {
+            // Step 1: decode at whatever native rate the browser uses.
+            const tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const rawBuffer = await tmpCtx.decodeAudioData(arrayBuffer.slice(0));
+            tmpCtx.close();
+        
+            // Step 2: force-render through an OfflineAudioContext locked to
+            // SpectralSpy.SAMPLE_RATE (44100). This guarantees the sample data
+            // matches the fixed rate the Go hashing pipeline assumes, regardless
+            // of what the browser's hardware output rate happens to be.
+            const TARGET_SAMPLE_RATE = 44100;
+            const offlineCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(
+                rawBuffer.numberOfChannels,
+                Math.ceil(rawBuffer.duration * TARGET_SAMPLE_RATE),
+                TARGET_SAMPLE_RATE
+            );
+            const source = offlineCtx.createBufferSource();
+            source.buffer = rawBuffer;
+            source.connect(offlineCtx.destination);
+            source.start(0);
+        
+            const resampled = await offlineCtx.startRendering();
+            console.log(`Native decode rate: ${rawBuffer.sampleRate}Hz → resampled to: ${resampled.sampleRate}Hz`);
+            return resampled;
+        }
+        
+        async function processAudio(file) {
+            console.log(`Processing: ${file.name}`);
+            const arrayBuffer = await file.arrayBuffer();
+            const audioBuffer = await decodeAudioTo44100Mono(arrayBuffer);
+        
+            const numChannels = audioBuffer.numberOfChannels;
+            const length = audioBuffer.length;
+            const monoF64 = new Float64Array(length);
+            const channelData = [];
+        
+            for (let c = 0; c < numChannels; c++) {
+                channelData.push(audioBuffer.getChannelData(c));
+            }
+        
+            for (let i = 0; i < length; i++) {
+                let sum = 0;
+                for (let c = 0; c < numChannels; c++) {
+                    sum += channelData[c][i];
+                }
+                monoF64[i] = sum / numChannels;
+            }
+        
+            const uint8View = new Uint8Array(monoF64.buffer);
+        
+            if (typeof window.processAudioWasm === "function") {
+                const resultJson = window.processAudioWasm(uint8View);
+                const result = JSON.parse(resultJson);
+        
+                if (result.error) {
+                    alert("Error processing audio: " + result.error);
+                    return;
+                }
+        
+                currentFingerprints = result;
+                document.getElementById('status').innerText = `Successfully extracted ${currentFingerprints.length} fingerprints!`;
+                document.getElementById('identify-btn').classList.remove('hidden');
+            } else {
+                console.error("WASM function 'processAudioWasm' is not registered.");
+            }
+        }
+
+        async function identifySong() {
+            if (!currentFingerprints) return;
+            
+            document.getElementById('identify-btn').disabled = true;
+            document.getElementById('identify-btn').innerText = "Identifying...";
+
+            try {
+                const response = await fetch('/api/v1/identify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fingerprints: currentFingerprints })
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    alert("API Error: " + data.error);
+                    return;
+                }
+
+                document.getElementById('results-panel').classList.remove('hidden');
+                document.getElementById('song-id').innerText = data.song_id;
+                document.getElementById('confidence').innerText = (data.confidence * 100).toFixed(2) + "%";
+                
+                // Display Diagnostics
+                document.getElementById('diag-score').innerText = data.diagnostics.match_score.toFixed(2);
+                document.getElementById('diag-db-hashes').innerText = data.diagnostics.unique_db_hashes;
+                document.getElementById('diag-total-time').innerText = data.diagnostics.total_time_ms + "ms";
+                
+            } catch (err) {
+                alert("Network error: " + err.message);
+            } finally {
+                document.getElementById('identify-btn').disabled = false;
+                document.getElementById('identify-btn').innerText = "Identify Song";
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            document.getElementById("audio-upload").addEventListener("change", (event) => {
+                if (event.target.files.length > 0) {
+                    document.getElementById('status').innerText = "Processing audio...";
+                    processAudio(event.target.files[0]);
+                }
+            });
+
+            document.getElementById("identify-btn").addEventListener("click", identifySong);
+        });
+    </script>
+</head>
+<body>
+    <h1>Upload Audio for Fingerprinting</h1>
+    <p>Select an MP3 to generate an acoustic fingerprint.</p>
+    <input type="file" id="audio-upload" accept="audio/*" />
+    <p id="status"></p>
+
+    <button id="identify-btn" class="hidden">Identify Song</button>
+
+    <div id="results-panel" class="hidden">
+        <h2>Match Found!</h2>
+        <p><strong>Song ID:</strong> <span id="song-id"></span></p>
+        <p><strong>Confidence:</strong> <span id="confidence"></span></p>
+
+        <div id="diagnostics">
+            <h3>Server Diagnostics</h3>
+            <p><strong>Match Score:</strong> <span id="diag-score"></span></p>
+            <p><strong>Unique DB Hashes Searched:</strong> <span id="diag-db-hashes"></span></p>
+            <p><strong>Total Processing Time:</strong> <span id="diag-total-time"></span></p>
+        </div>
+    </div>
+</body>
+</html>

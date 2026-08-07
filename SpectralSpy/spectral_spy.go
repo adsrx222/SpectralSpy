@@ -15,20 +15,20 @@ import (
 
 const SAMPLE_RATE = 44100
 const WINDOW_SIZE = 4096
-const HOP_SIZE    = WINDOW_SIZE / 2
+const HOP_SIZE = WINDOW_SIZE / 2
 
 const PEAK_NEIGHBORHOOD_TIME = 5 // ±frames
 const PEAK_NEIGHBORHOOD_FREQ = 5 // ±FFT bins
 
-const TARGET_ZONE_TIME_START = 1  // frames ahead where zone begins
-const TARGET_ZONE_TIME_END   = 18 // frames ahead where zone ends
-const TARGET_ZONE_FREQ_BINS  = 13 // ±FFT bins around anchor frequency bin
-const MAX_FAN_OUT            = 10
+const TARGET_ZONE_TIME_START = 2 // frames ahead where zone begins
+const TARGET_ZONE_TIME_END = 20   // frames ahead where zone ends
+const TARGET_ZONE_FREQ_BINS = 5 // ±FFT bins around anchor frequency bin
+const MAX_FAN_OUT = 10
 
-const MAX_PEAKS_PER_FRAME = 4  // Top-K frame-level rate limit
-const CFAR_TRAIN_BINS    = 8  // CFAR noise estimation window size
-const CFAR_GUARD_BINS    = 2  // CFAR guard window size
-const CFAR_FACTOR        = 2.5 // SNR factor over dynamic noise floor
+const MAX_PEAKS_PER_FRAME = 5 // Top-K frame-level rate limit
+const CFAR_TRAIN_BINS = 8      // CFAR noise estimation window size
+const CFAR_GUARD_BINS = 2      // CFAR guard window size
+const CFAR_FACTOR = 1.25       // SNR factor over dynamic noise floor
 
 var HANN_WINDOW = func() []float64 {
 	w := make([]float64, WINDOW_SIZE)
@@ -59,6 +59,12 @@ var FREQ_WEIGHTS = func() []float64 {
 	return weights
 }()
 
+type Spectrogram struct {
+	Mags  [][]float64
+	Times []float64
+	BinHz float64
+}
+
 type ConstellationPoint struct {
 	Timestamp float64
 	Frequency float64
@@ -66,15 +72,21 @@ type ConstellationPoint struct {
 	BinIndex  int
 }
 
-type HashEntry struct {
-	Hash       uint64
-	AnchorTime float64
+type Fingerprint struct {
+	Hash       uint64  `json:"hash,string"`
+	AnchorTime float64 `json:"anchor_time"`
 }
 
-type SpectrogramData struct {
-	Mags  [][]float64
-	Times []float64
-	BinHz float64
+type DBEntry struct {
+	Hash       uint64
+	SongID     string
+	AnchorTime float64
+	Weight     float64
+}
+
+type OffsetKey struct {
+	SongID string
+	Bin    uint64
 }
 
 type StageMetrics struct {
@@ -84,10 +96,10 @@ type StageMetrics struct {
 	TotalDuration       time.Duration `json:"total_duration"`
 }
 
-func buildSpectrogram(ctx context.Context, samples []float64) SpectrogramData {
+func buildSpectrogram(ctx context.Context, samples []float64) Spectrogram {
 	numSamples := len(samples)
 	if numSamples == 0 {
-		return SpectrogramData{BinHz: float64(SAMPLE_RATE) / float64(WINDOW_SIZE)}
+		return Spectrogram{BinHz: float64(SAMPLE_RATE) / float64(WINDOW_SIZE)}
 	}
 
 	numFrames := (numSamples + HOP_SIZE - 1) / HOP_SIZE
@@ -147,14 +159,14 @@ func buildSpectrogram(ctx context.Context, samples []float64) SpectrogramData {
 
 	wg.Wait()
 
-	return SpectrogramData{
+	return Spectrogram{
 		Mags:  mags,
 		Times: times,
 		BinHz: float64(SAMPLE_RATE) / float64(WINDOW_SIZE),
 	}
 }
 
-func findPeaks(ctx context.Context, sg SpectrogramData) [][]ConstellationPoint {
+func findPeaks(ctx context.Context, sg Spectrogram) [][]ConstellationPoint {
 	numFrames := len(sg.Mags)
 	if numFrames == 0 {
 		return nil
@@ -194,40 +206,30 @@ func findPeaks(ctx context.Context, sg SpectrogramData) [][]ConstellationPoint {
 						continue
 					}
 
-					cMin := max(0, f-CFAR_TRAIN_BINS)
-					cMax := min(numBins-1, f+CFAR_TRAIN_BINS)
-					noiseSum := 0.0
-					noiseCount := 0
-
-					for nf := cMin; nf <= cMax; nf++ {
-						if nf < f-CFAR_GUARD_BINS || nf > f+CFAR_GUARD_BINS {
-							noiseSum += sg.Mags[t][nf]
-							noiseCount++
-						}
-					}
-
-					if noiseCount > 0 {
-						noiseFloor := noiseSum / float64(noiseCount)
-						if mag < noiseFloor*CFAR_FACTOR {
-							continue // reject signal below local dynamic noise floor
-						}
-					}
-
-					// local maxima check
+					// calculate local neighborhood average
 					fMin := max(0, f-PEAK_NEIGHBORHOOD_FREQ)
 					fMax := min(numBins-1, f+PEAK_NEIGHBORHOOD_FREQ)
+
+					var localSum float64
+					var count int
 
 					isMax := true
 					for nt := tMin; nt <= tMax && isMax; nt++ {
 						for nf := fMin; nf <= fMax; nf++ {
-							if sg.Mags[nt][nf] > mag {
+							neighborMag := sg.Mags[nt][nf]
+							localSum += neighborMag
+							count++
+
+							// strict local maxima check
+							if neighborMag > mag {
 								isMax = false
-								break
 							}
 						}
 					}
 
-					if isMax {
+					// only keep peak if it's the strict maximum AND exceeds the local average * CFAR_FACTOR
+					localAvg := localSum / float64(count)
+					if isMax && mag > (localAvg*CFAR_FACTOR) {
 						localPeaks = append(localPeaks, ConstellationPoint{
 							Timestamp: sg.Times[t],
 							Frequency: float64(f) * sg.BinHz,
@@ -237,21 +239,14 @@ func findPeaks(ctx context.Context, sg SpectrogramData) [][]ConstellationPoint {
 					}
 				}
 
-				// top-K frame level rate limiting
-				if len(localPeaks) > MAX_PEAKS_PER_FRAME {
-					// sort by magnitude descending to select top K
-					sort.Slice(localPeaks, func(i, j int) bool {
-						return localPeaks[i].Magnitude > localPeaks[j].Magnitude
-					})
-					localPeaks = localPeaks[:MAX_PEAKS_PER_FRAME]
-
-					// sort ascending by BinIndex
-					sort.Slice(localPeaks, func(i, j int) bool {
-						return localPeaks[i].BinIndex < localPeaks[j].BinIndex
-					})
-				}
-
 				if len(localPeaks) > 0 {
+					// Optional: Sort by magnitude and enforce MAX_PEAKS_PER_FRAME[cite: 18]
+					if len(localPeaks) > MAX_PEAKS_PER_FRAME {
+						sort.Slice(localPeaks, func(i, j int) bool {
+							return localPeaks[i].Magnitude > localPeaks[j].Magnitude
+						})
+						localPeaks = localPeaks[:MAX_PEAKS_PER_FRAME]
+					}
 					peaks[t] = localPeaks
 				}
 			}
@@ -264,6 +259,7 @@ func findPeaks(ctx context.Context, sg SpectrogramData) [][]ConstellationPoint {
 
 func hashPair(anchor, tether ConstellationPoint) uint64 {
 	var buf [24]byte
+
 	binary.LittleEndian.PutUint64(buf[0:8], math.Float64bits(anchor.Frequency))
 	binary.LittleEndian.PutUint64(buf[8:16], math.Float64bits(tether.Frequency))
 	binary.LittleEndian.PutUint64(buf[16:24], math.Float64bits(tether.Timestamp-anchor.Timestamp))
@@ -271,7 +267,7 @@ func hashPair(anchor, tether ConstellationPoint) uint64 {
 	return xxh3.Hash(buf[:])
 }
 
-func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []HashEntry {
+func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Fingerprint {
 	numFrames := len(peaks)
 	if numFrames == 0 {
 		return nil
@@ -280,7 +276,7 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Ha
 	numWorkers := runtime.GOMAXPROCS(0)
 	framesPerWorker := (numFrames + numWorkers - 1) / numWorkers
 
-	results := make([][]HashEntry, numWorkers)
+	results := make([][]Fingerprint, numWorkers)
 	var wg sync.WaitGroup
 
 	for w := 0; w < numWorkers; w++ {
@@ -295,7 +291,7 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Ha
 		go func(start, end, workerID int) {
 			defer wg.Done()
 
-			local := make([]HashEntry, 0, 1024)
+			local := make([]Fingerprint, 0, 1024)
 
 			for anchorT := start; anchorT < end; anchorT++ {
 				if ctx.Err() != nil {
@@ -321,7 +317,7 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Ha
 								break
 							}
 
-							local = append(local, HashEntry{
+							local = append(local, Fingerprint{
 								Hash:       hashPair(anchor, tether),
 								AnchorTime: anchor.Timestamp,
 							})
@@ -346,7 +342,7 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Ha
 		totalLen += len(r)
 	}
 
-	all := make([]HashEntry, totalLen)
+	all := make([]Fingerprint, totalLen)
 	offset := 0
 	for _, r := range results {
 		copy(all[offset:], r)
@@ -356,13 +352,13 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Ha
 	return all
 }
 
-func Process(ctx context.Context, samples []float64) []HashEntry {
+func Process(ctx context.Context, samples []float64) []Fingerprint {
 	sg := buildSpectrogram(ctx, samples)
 	peaks := findPeaks(ctx, sg)
 	return generateHashEntries(ctx, peaks)
 }
 
-func ProcessWithPeaks(ctx context.Context, samples []float64) ([]HashEntry, [][]ConstellationPoint) {
+func ProcessWithPeaks(ctx context.Context, samples []float64) ([]Fingerprint, [][]ConstellationPoint) {
 	sg := buildSpectrogram(ctx, samples)
 	rawPeaks := findPeaks(ctx, sg)
 
@@ -376,7 +372,7 @@ func ProcessWithPeaks(ctx context.Context, samples []float64) ([]HashEntry, [][]
 	return generateHashEntries(ctx, rawPeaks), cleanPeaks
 }
 
-func ProcessWithMetrics(ctx context.Context, samples []float64) ([]HashEntry, StageMetrics) {
+func ProcessWithMetrics(ctx context.Context, samples []float64) ([]Fingerprint, StageMetrics) {
 	var metrics StageMetrics
 	totalStart := time.Now()
 
@@ -396,123 +392,139 @@ func ProcessWithMetrics(ctx context.Context, samples []float64) ([]HashEntry, St
 	return entries, metrics
 }
 
-func generateHashEntriesWithParams(ctx context.Context, peaks [][]ConstellationPoint, freqBins, timeStart, timeEnd int) []HashEntry {
-	numFrames := len(peaks)
-	if numFrames == 0 {
-		return nil
-	}
+// func MatchFingerprints(queryFps []Fingerprint, db map[uint64][]DBEntry) (string, uint64, float64, float64) {
+// 	hist := make(map[OffsetKey]uint64)
+// 	songTotals := make(map[string]uint64)
 
-	numWorkers := runtime.GOMAXPROCS(0)
-	framesPerWorker := (numFrames + numWorkers - 1) / numWorkers
+// 	for _, qfp := range queryFps {
+// 		dbEntries := db[qfp.Hash]
+// 		if len(dbEntries) == 0 {
+// 			continue
+// 		}
 
-	results := make([][]HashEntry, numWorkers)
-	var wg sync.WaitGroup
+// 		for _, de := range dbEntries {
+// 			rawOffset := de.AnchorTime - qfp.AnchorTime
+// 			bin := uint64(math.Round(rawOffset / float64(HOP_SIZE)))
 
-	for w := 0; w < numWorkers; w++ {
-		start := w * framesPerWorker
-		end := min(start+framesPerWorker, numFrames)
+// 			key := OffsetKey{
+// 				SongID: de.SongID,
+// 				Bin:    bin,
+// 			}
 
-		if start >= numFrames {
-			break
+// 			hist[key]++
+// 			songTotals[de.SongID]++
+// 		}
+// 	}
+
+// 	// Early exit if no matching fingerprints were found
+// 	if len(songTotals) == 0 {
+// 		return "", 0, 0.0, 0.0
+// 	}
+
+// 	// 1. Find the most common track (SongID) overall
+// 	var bestSongID string
+// 	var maxSongTotal uint64
+// 	for songID, total := range songTotals {
+// 		if total > maxSongTotal {
+// 			maxSongTotal = total
+// 			bestSongID = songID
+// 		}
+// 	}
+
+// 	// 2. Find the most common bin combo for the winning SongID
+// 	var bestBin uint64
+// 	var bestScore uint64
+// 	var secondBestScore uint64
+
+// 	for key, count := range hist {
+// 		if key.SongID == bestSongID {
+// 			if count > bestScore {
+// 				secondBestScore = bestScore
+// 				bestScore = count
+// 				bestBin = key.Bin
+// 			} else if count > secondBestScore {
+// 				secondBestScore = count
+// 			}
+// 		}
+// 	}
+
+// 	// 3. Compute confidence ratio safely to prevent zero-division or index panics
+// 	var confidenceRatio float64
+// 	if secondBestScore > 0 {
+// 		confidenceRatio = float64(bestScore) / float64(secondBestScore)
+// 	} else {
+// 		confidenceRatio = float64(bestScore)
+// 	}
+
+// 	timeOffset := float64(bestBin) * float64(HOP_SIZE) / float64(SAMPLE_RATE)
+// 	return bestSongID, bestScore, timeOffset, confidenceRatio
+// }
+
+func MatchFingerprints(queryFps []Fingerprint, db map[uint64][]DBEntry) (string, uint64, float64, float64) {
+	hist := make(map[OffsetKey]uint64)
+	songTotals := make(map[string]uint64)
+
+	for _, qfp := range queryFps {
+		dbEntries := db[qfp.Hash]
+		if len(dbEntries) == 0 {
+			continue
 		}
 
-		wg.Add(1)
-		go func(start, end, workerID int) {
-			defer wg.Done()
+		for _, de := range dbEntries {
+			rawOffset := de.AnchorTime - qfp.AnchorTime
+			bin := uint64(math.Round(rawOffset / float64(HOP_SIZE)))
 
-			local := make([]HashEntry, 0, 1024)
-
-			for anchorT := start; anchorT < end; anchorT++ {
-				if ctx.Err() != nil {
-					return
-				}
-
-				tetherStart := anchorT + timeStart
-				tetherEnd := min(anchorT+timeEnd, numFrames-1)
-
-				for _, anchor := range peaks[anchorT] {
-					minBin := anchor.BinIndex - freqBins
-					maxBin := anchor.BinIndex + freqBins
-
-					matches := 0
-
-				tetherSearch:
-					for tetherT := tetherStart; tetherT <= tetherEnd; tetherT++ {
-						for _, tether := range peaks[tetherT] {
-							if tether.BinIndex < minBin {
-								continue
-							}
-							if tether.BinIndex > maxBin {
-								break
-							}
-
-							local = append(local, HashEntry{
-								Hash:       hashPair(anchor, tether),
-								AnchorTime: anchor.Timestamp,
-							})
-
-							matches++
-							if matches >= MAX_FAN_OUT {
-								break tetherSearch
-							}
-						}
-					}
-				}
+			key := OffsetKey{
+				SongID: de.SongID,
+				Bin:    bin,
 			}
 
-			results[workerID] = local
-		}(start, end, w)
+			hist[key]++
+			songTotals[de.SongID]++
+		}
 	}
 
-	wg.Wait()
-
-	totalLen := 0
-	for _, r := range results {
-		totalLen += len(r)
+	// Early exit if no matching fingerprints were found
+	if len(songTotals) == 0 {
+		return "", 0, 0.0, 0.0
 	}
 
-	all := make([]HashEntry, totalLen)
-	offset := 0
-	for _, r := range results {
-		copy(all[offset:], r)
-		offset += len(r)
+	// 1. Find the 1st and 2nd choice tracks (SongID) by overall vote count
+	var bestSongID string
+	var bestSongTotal uint64
+	var secondBestSongTotal uint64
+
+	for songID, total := range songTotals {
+		if total > bestSongTotal {
+			secondBestSongTotal = bestSongTotal
+			bestSongTotal = total
+			bestSongID = songID
+		} else if total > secondBestSongTotal {
+			secondBestSongTotal = total
+		}
 	}
 
-	return all
-}
+	// 2. Find the most common bin combo for the winning SongID
+	var bestBin uint64
+	var bestScore uint64
 
-func ProcessWithParams(ctx context.Context, samples []float64, freqBins, timeStart, timeEnd int) ([]HashEntry, StageMetrics) {
-	if freqBins < 1 {
-		freqBins = 1
-	} else if freqBins > 32 {
-		freqBins = 32
+	for key, count := range hist {
+		if key.SongID == bestSongID {
+			if count > bestScore {
+				bestScore = count
+				bestBin = key.Bin
+			}
+		}
 	}
 
-	if timeStart < 1 {
-		timeStart = 1
+	// 3. Compute confidence ratio (1st choice track votes / 2nd choice track votes)
+	var confidenceRatio float64
+	if secondBestSongTotal > 0 {
+		confidenceRatio = float64(bestSongTotal) / float64(secondBestSongTotal)
+	} else {
+		confidenceRatio = float64(bestSongTotal)
 	}
 
-	if timeEnd <= timeStart {
-		timeEnd = timeStart + 1
-	} else if timeEnd > 200 {
-		timeEnd = 200
-	}
-
-	var metrics StageMetrics
-	totalStart := time.Now()
-
-	t0 := time.Now()
-	sg := buildSpectrogram(ctx, samples)
-	metrics.SpectrogramDuration = time.Since(t0)
-
-	t1 := time.Now()
-	peaks := findPeaks(ctx, sg)
-	metrics.PeakFindDuration = time.Since(t1)
-
-	t2 := time.Now()
-	entries := generateHashEntriesWithParams(ctx, peaks, freqBins, timeStart, timeEnd)
-	metrics.HashGenDuration = time.Since(t2)
-
-	metrics.TotalDuration = time.Since(totalStart)
-	return entries, metrics
+	timeOffset := float64(bestBin) * float64(HOP_SIZE) / float64(SAMPLE_RATE)
+	return bestSongID, bestScore, timeOffset, confidenceRatio
 }

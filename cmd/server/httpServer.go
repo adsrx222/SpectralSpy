@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"os"
 
-	"spectralspy/server"
+	"github.com/adsrx222/SpectralSpy/server"
 )
 
 func main() {

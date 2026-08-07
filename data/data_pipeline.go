@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"spectralspy/pkg/SpectralSpy"
+	"github.com/adsrx222/SpectralSpy/SpectralSpy"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -31,6 +31,8 @@ const (
 	MaestroJSON_URL = "https://storage.googleapis.com/magentadata/datasets/maestro/v3.0.0/maestro-v3.0.0.json"
 	WorkspaceDir    = "misc/workspace"
 )
+
+const MAX_WAVS = 150
 
 type SongMetadata struct {
 	Artist   string
@@ -55,24 +57,158 @@ func GetSongID(wavPath string) string {
 	return strconv.FormatUint(hash64, 36)
 }
 
-func BatchInsertHashes(ctx context.Context, db *sql.DB, songID string, hashes []SpectralSpy.HashEntry) error {
+func BatchInsertHashes(ctx context.Context, db *sql.DB, songID string, hashes []SpectralSpy.Fingerprint) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, "INSERT INTO audio_hashes (hash, song_id, anchor_time) VALUES (?, ?, ?)")
+	hashStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO audio_hashes (hash, song_id, anchor_time) 
+		VALUES (?, ?, ?)
+		ON CONFLICT(hash, song_id, anchor_time) DO NOTHING
+	`)
 	if err != nil {
-		return err
+		return fmt.Errorf("prepare audio_hashes statement: %w", err)
 	}
-	defer stmt.Close()
+	defer hashStmt.Close()
+
+	// track unique hashes to maintain accurate document frequency
+	uniqueHashes := make(map[uint64]struct{}, len(hashes))
 
 	for _, h := range hashes {
-		if _, err := stmt.ExecContext(ctx, int64(h.Hash), songID, h.AnchorTime); err != nil {
-			return err
+		if _, err := hashStmt.ExecContext(ctx, int64(h.Hash), songID, h.AnchorTime); err != nil {
+			return fmt.Errorf("exec audio_hashes insert: %w", err)
+		}
+		uniqueHashes[h.Hash] = struct{}{}
+	}
+
+	weightStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO hash_weight (hash, track_count, weight)
+		VALUES (?, 1, 1.0)
+		ON CONFLICT(hash) DO UPDATE SET
+			track_count = track_count + 1
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare hash_weight statement: %w", err)
+	}
+	defer weightStmt.Close()
+
+	for hash := range uniqueHashes {
+		if _, err := weightStmt.ExecContext(ctx, int64(hash)); err != nil {
+			return fmt.Errorf("exec hash_weight update for hash %d: %w", hash, err)
 		}
 	}
+
+	return tx.Commit()
+}
+
+func InsertSongMetadata(ctx context.Context, db *sql.DB, songID string, meta SongMetadata) error {
+	composerJSON, err := json.Marshal(map[string]string{"default": meta.Artist})
+	if err != nil {
+		return fmt.Errorf("marshal canonical_composer: %w", err)
+	}
+
+	titleJSON, err := json.Marshal(map[string]string{"default": meta.Title})
+	if err != nil {
+		return fmt.Errorf("marshal canonical_title: %w", err)
+	}
+
+	yearJSON, err := json.Marshal(map[string]int{"default": meta.Year})
+	if err != nil {
+		return fmt.Errorf("marshal year: %w", err)
+	}
+
+	midiJSON, err := json.Marshal(map[string]string{"default": meta.MidiPath})
+	if err != nil {
+		return fmt.Errorf("marshal midi_filename: %w", err)
+	}
+
+	audioJSON, err := json.Marshal(map[string]string{"default": meta.WavPath})
+	if err != nil {
+		return fmt.Errorf("marshal audio_filename: %w", err)
+	}
+
+	query := `
+		INSERT INTO songs (
+			song_id, 
+			canonical_composer, 
+			canonical_title, 
+			year, 
+			midi_filename, 
+			audio_filename
+		) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(song_id) DO UPDATE SET
+			canonical_composer = excluded.canonical_composer,
+			canonical_title    = excluded.canonical_title,
+			year               = excluded.year,
+			midi_filename      = excluded.midi_filename,
+			audio_filename     = excluded.audio_filename
+	`
+
+	_, err = db.ExecContext(
+		ctx,
+		query,
+		songID,
+		string(composerJSON),
+		string(titleJSON),
+		string(yearJSON),
+		string(midiJSON),
+		string(audioJSON),
+	)
+	if err != nil {
+		return fmt.Errorf("exec upsert song metadata: %w", err)
+	}
+
+	return nil
+}
+
+func RecalculateBM25Weights(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var totalSongs float64
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM songs`).Scan(&totalSongs)
+	if err != nil {
+		return fmt.Errorf("count total songs: %w", err)
+	}
+
+	if totalSongs == 0 {
+		return nil
+	}
+
+	// 1. Clear out old weights
+	if _, err := tx.ExecContext(ctx, `DELETE FROM hash_weight`); err != nil {
+		return fmt.Errorf("clear hash_weight: %w", err)
+	}
+
+	// 2. Group by hash, calculate track_count, and insert the BM25 formula directly
+	// BM25 = \ln( 1 + (N - track_count + 0.5) / (track_count + 0.5) )
+	query := `
+		INSERT INTO hash_weight (hash, track_count, weight)
+		SELECT 
+			hash, 
+			COUNT(DISTINCT song_id) as track_count,
+			LN(1.0 + ((? - COUNT(DISTINCT song_id) + 0.5) / (COUNT(DISTINCT song_id) + 0.5))) as weight
+		FROM audio_hashes
+		GROUP BY hash
+	`
+	
+	result, err := tx.ExecContext(ctx, query, totalSongs)
+	if err != nil {
+		return fmt.Errorf("insert bm25 weights: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	fmt.Printf("BM25 Weights Recalculated for %d unique hashes!\n", rowsAffected)
 
 	return tx.Commit()
 }
@@ -165,9 +301,13 @@ func ProcessWavFiles(workspaceDir string, songMap map[string]SongMetadata, callb
 	defer zr.Close()
 
 	totalSongs := len(songMap)
-	currentSong := 1
+	processedWavs := 0
 
 	for _, f := range zr.File {
+		if processedWavs >= MAX_WAVS {
+			break
+		}
+
 		if !strings.EqualFold(filepath.Ext(f.Name), ".wav") {
 			continue
 		}
@@ -191,13 +331,13 @@ func ProcessWavFiles(workspaceDir string, songMap map[string]SongMetadata, callb
 			return fmt.Errorf("opening wav %s: %w", f.Name, err)
 		}
 
-		if err := callback(f.Name, matchedMeta, rc, currentSong, totalSongs); err != nil {
+		if err := callback(f.Name, matchedMeta, rc, processedWavs, totalSongs); err != nil {
 			rc.Close()
 			return err
 		}
 		rc.Close()
 
-		currentSong++
+		processedWavs++
 	}
 
 	return nil
@@ -221,6 +361,10 @@ func DecodeWavToFloat64(r io.Reader) ([]float64, error) {
 	format := d.Format()
 	if format == nil {
 		return nil, fmt.Errorf("could not parse WAV format")
+	}
+
+	if format.SampleRate != SpectralSpy.SAMPLE_RATE {
+		return nil, fmt.Errorf("unsupported sample rate %d, expected %d", format.SampleRate, SpectralSpy.SAMPLE_RATE)
 	}
 
 	numChannels := format.NumChannels

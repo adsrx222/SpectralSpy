@@ -3,11 +3,9 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -18,40 +16,45 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 
-	"spectralspy/db"
+	"github.com/adsrx222/SpectralSpy/db"
+	"github.com/adsrx222/SpectralSpy/SpectralSpy"
 
+	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
 
-const MAX_REQUEST_LENGTH = 500
-
-type Fingerprint struct {
-	Hash       uint64  `json:"hash"`
-	AnchorTime float64 `json:"anchor_time"`
-}
+const MAX_REQUEST_LENGTH = 500000
 
 type IdentifyRequest struct {
-	Fingerprints []Fingerprint `json:"fingerprints"`
+	Fingerprints []SpectralSpy.Fingerprint `json:"fingerprints"`
+}
+
+type Diagnostics struct {
+	MatchScore      int64 `json:"match_score"`
+	QueryHashes     int     `json:"query_hashes"`
+	UniqueDBHashes  int     `json:"unique_db_hashes"`
+	DecodeTimeMs    int64   `json:"decode_time_ms"`
+	ExtractTimeMs   int64   `json:"extract_time_ms"`
+	DBQueryTimeMs   int64   `json:"db_query_time_ms"`
+	StreamTimeMs    int64   `json:"stream_time_ms"`
+	MatchTimeMs     int64   `json:"match_time_ms"`
+	TotalTimeMs     int64   `json:"total_time_ms"`
 }
 
 type IdentifyResponse struct {
-	SongID     string  `json:"song_id"`
-	Confidence float64 `json:"confidence"`
-	TimeOffset float64 `json:"time_offset"`
+	SongID      string      `json:"song_id"`
+	Confidence  float64     `json:"confidence"`
+	TimeOffset  float64     `json:"time_offset"`
+	Diagnostics Diagnostics `json:"diagnostics"`
 }
 
 type APIError struct {
 	Error   string `json:"error"`
 	Details string `json:"details,omitempty"`
-}
-
-type OffsetKey struct {
-	SongID     string
-	AnchorTime float64
 }
 
 type LogEntry struct {
@@ -87,18 +90,15 @@ func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
 }
 
 func (i *IPRateLimiter) GetLimiter(ip string) *rate.Limiter {
-	// Fast path: Atomic read with zero mutex overhead
 	if val, ok := i.ips.Load(ip); ok {
 		return val.(*rate.Limiter)
 	}
 
-	// Slow path: Create new limiter and store safely without race conditions
 	limiter := rate.NewLimiter(i.r, i.b)
 	actual, _ := i.ips.LoadOrStore(ip, limiter)
 	return actual.(*rate.Limiter)
 }
 
-// NewApp initializes and returns an app instance with configured dependencies
 // NewApp initializes and returns an app instance with configured dependencies
 func NewApp(dbConn *sql.DB, s3Client *s3.Client, bucket string, logger *slog.Logger) *App {
 	if logger == nil {
@@ -141,20 +141,38 @@ func (a *App) startLogWorker() {
 	}()
 }
 
-// routes builds and returns the HTTP router for the application
-func (a *App) Routes() http.Handler {
-	r := chi.NewRouter()
+func (a *App) Routes() *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
 
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/identify", a.HandleIdentify)
-		r.Get("/songs/{id}/midi", a.HandleGetMIDI)
-		r.Get("/songs/{id}/constellation", a.HandleGetConstellation)
-	})
+	// CORS Configuration
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
+	// apply Middlewares
+	r.Use(a.LoggerMiddleware())
+	r.Use(a.RateLimitMiddleware())
+
+	// api routes
+	api := r.Group("/api/v1")
+	{
+		api.POST("/identify", a.HandleIdentify)
+		api.GET("/songs/:id/midi", a.HandleGetMIDI)
+		api.GET("/songs/:id/constellation", a.HandleGetConstellation)
+	}
+
+	r.NoRoute(gin.WrapH(http.FileServer(http.Dir("./static"))))
 
 	return r
 }
 
-// runs & initializes dependencies from environment variables and starts the HTTP server
+// run initializes dependencies from environment variables and starts the HTTP server
 func Run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -164,7 +182,7 @@ func Run() error {
 	dbToken := os.Getenv("TURSO_AUTH_TOKEN")
 
 	if dbUrl == "" {
-		dbUrl = "file:hashes.sqlite"
+		dbUrl = "file:misc/workspace/workspace_hash.sqlite"
 	}
 
 	if dbToken != "" && !strings.Contains(dbUrl, "authToken=") {
@@ -243,252 +261,231 @@ func Run() error {
 	return nil
 }
 
-func (a *App) LoggerMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (a *App) LoggerMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		start := time.Now()
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
-		next.ServeHTTP(ww, r)
+		c.Next()
 
 		entry := LogEntry{
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			Status:     ww.Status(),
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			Status:     c.Writer.Status(),
 			DurationMs: time.Since(start).Milliseconds(),
-			IP:         r.RemoteAddr,
+			IP:         c.ClientIP(),
 		}
 
 		// non-blocking write to logging channel prevents worker stalling
 		select {
-			case a.LogChan <- entry:
-			default:
+		case a.LogChan <- entry:
+		default:
 		}
-	})
+	}
 }
 
-func (a *App) RateLimitMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r)
-	})
+func (a *App) RateLimitMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+	}
 }
 
-// POST /identify
-func (a *App) HandleIdentify(w http.ResponseWriter, r *http.Request) {
+// POST /api/v1/identify
+// HandleIdentify processes POST /api/v1/identify requests by querying matching audio hashes,
+// joining weights from the hash_weight table, and passing entries to SpectralSpy.MatchFingerprints.
+func (a *App) HandleIdentify(c *gin.Context) {
 	reqStart := time.Now()
 
-	// decode JSON & request validation
 	t0 := time.Now()
-	r.Body = http.MaxBytesReader(w, r.Body, 100*1024)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2*1024*1024)
 
 	var req IdentifyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		a.respondError(w, http.StatusBadRequest, "Invalid JSON payload")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		a.respondError(c, http.StatusBadRequest, "Invalid JSON payload")
 		return
 	}
 
 	reqLen := len(req.Fingerprints)
-
 	if reqLen == 0 {
-		a.respondError(w, http.StatusBadRequest, "No fingerprints provided")
+		a.respondError(c, http.StatusBadRequest, "No fingerprints provided")
 		return
 	} else if reqLen > MAX_REQUEST_LENGTH {
-		a.respondError(w, http.StatusBadRequest, fmt.Sprintf("Maximum %d fingerprints allowed per request", MAX_REQUEST_LENGTH))
+		a.respondError(c, http.StatusBadRequest, fmt.Sprintf("Maximum %d fingerprints allowed", MAX_REQUEST_LENGTH))
 		return
 	}
 	decodeDuration := time.Since(t0)
 
-	// group timestamps by hash
 	t1 := time.Now()
-	queryMap := make(map[uint64][]float64, reqLen)
+	uniqueHashes := make(map[uint64]bool, reqLen)
 	for _, fp := range req.Fingerprints {
-		queryMap[fp.Hash] = append(queryMap[fp.Hash], fp.AnchorTime)
+		uniqueHashes[fp.Hash] = true
 	}
-	part1Duration := time.Since(t1)
+	extractDuration := time.Since(t1)
 
-	// build SQL query parameters & execute
 	t2 := time.Now()
-	uniqueCount := len(queryMap)
-	placeholders := make([]string, 0, uniqueCount)
-	args := make([]interface{}, 0, uniqueCount)
+	placeholders := make([]string, 0, len(uniqueHashes))
+	args := make([]interface{}, 0, len(uniqueHashes))
 
-	for hash := range queryMap {
+	for hash := range uniqueHashes {
 		placeholders = append(placeholders, "?")
 		args = append(args, int64(hash))
 	}
 
+	// Updated query joining with the 'hash_weight' table per schema.sql
 	query := fmt.Sprintf(`
-		SELECT hash, song_id, anchor_time 
-		FROM audio_hashes 
-		WHERE hash IN (%s)`, strings.Join(placeholders, ","))
-
-	rows, err := a.DB.QueryContext(r.Context(), query, args...)
+		SELECT ah.hash, ah.song_id, ah.anchor_time, COALESCE(hw.weight, 1.0) AS weight
+		FROM audio_hashes ah
+		LEFT JOIN hash_weight hw ON CAST(ah.hash AS TEXT) = CAST(hw.hash AS TEXT)
+		WHERE ah.hash IN (%s)`, strings.Join(placeholders, ","))
+	
+	rows, err := a.DB.QueryContext(c.Request.Context(), query, args...)
 	if err != nil {
 		a.Logger.Error("Database query failed", "err", err)
-		a.respondError(w, http.StatusInternalServerError, "Internal database error")
+		a.respondError(c, http.StatusInternalServerError, "Internal database error")
 		return
 	}
 	defer rows.Close()
-	part2Duration := time.Since(t2)
+	dbQueryDuration := time.Since(t2)
 
-	// fast streaming row iteration
 	t3 := time.Now()
-	const HOP_SIZE = 2048.0
-	globalHist := make(map[OffsetKey]int, uniqueCount)
+	dbMap := make(map[uint64][]SpectralSpy.DBEntry)
 
 	for rows.Next() {
 		var hash int64
 		var songID string
-		var dbAnchorTime float64
+		var anchorTime float64
+		var weight float64
 
-		if err := rows.Scan(&hash, &songID, &dbAnchorTime); err != nil {
+		if err := rows.Scan(&hash, &songID, &anchorTime, &weight); err != nil {
+			a.Logger.Warn("Failed to scan row", "err", err)
 			continue
 		}
 
-		uHash := uint64(hash)
-		if queryAnchors, exists := queryMap[uHash]; exists {
-			// len(queryAnchors) is almost always = 1	
-			for _, qAnchorTime := range queryAnchors {
-				quantised := math.Round((dbAnchorTime - qAnchorTime) / HOP_SIZE)
-				key := OffsetKey{SongID: songID, AnchorTime: quantised}
-				globalHist[key]++
-			}
-		}
+		uintHash := uint64(hash)
+		dbMap[uintHash] = append(dbMap[uintHash], SpectralSpy.DBEntry{
+			Hash:       uintHash,
+			SongID:     songID,
+			AnchorTime: anchorTime,
+			Weight:     weight,
+		})
 	}
-	part3Duration := time.Since(t3)
 
-	// check for errors during iteration & find top matches 
-	t4 := time.Now()
 	if err := rows.Err(); err != nil {
 		a.Logger.Error("Row iteration error", "err", err)
-		a.respondError(w, http.StatusInternalServerError, "Database read error")
+		a.respondError(c, http.StatusInternalServerError, "Database read error")
+		return
+	}
+	streamDuration := time.Since(t3)
+
+	t4 := time.Now()
+	if len(dbMap) == 0 {
+		a.respondError(c, http.StatusNotFound, "No matching song found")
 		return
 	}
 
-	var bestSong string
-	var firstBestVotes int
-	var secondBestVotes int
-	var bestOffset float64
-
-	for key, count := range globalHist {
-		if count > firstBestVotes {
-			secondBestVotes = firstBestVotes
-			firstBestVotes = count
-			bestSong = key.SongID
-			bestOffset = key.AnchorTime
-		} else if count > secondBestVotes {
-			secondBestVotes = count
-		}
+	// Perform candidate selection and RANSAC offset verification
+	bestSongID, bestScore, matchOffset, confidence := SpectralSpy.MatchFingerprints(req.Fingerprints, dbMap)
+	if bestSongID == "" {
+		a.respondError(c, http.StatusNotFound, "No matching song found")
+		return
 	}
-	part4Duration := time.Since(t4)
+	matchDuration := time.Since(t4)
 
-	// calculate total E2E & section percentages
 	totalDuration := time.Since(reqStart)
 
-	calcPct := func(d time.Duration) float64 {
-		if totalDuration == 0 {
-			return 0
-		}
-		return (float64(d.Nanoseconds()) / float64(totalDuration.Nanoseconds())) * 100.0
-	}
-
-	a.Logger.Info("[HandleIdentify Timing Breakdown]",
-		"decode_val_time", decodeDuration.String(),
-		"decode_val_pct", fmt.Sprintf("%.2f%%", calcPct(decodeDuration)),
-		"part1_group_time", part1Duration.String(),
-		"part1_pct", fmt.Sprintf("%.2f%%", calcPct(part1Duration)),
-		"part2_db_query_time", part2Duration.String(),
-		"part2_pct", fmt.Sprintf("%.2f%%", calcPct(part2Duration)),
-		"part3_stream_iter_time", part3Duration.String(),
-		"part3_pct", fmt.Sprintf("%.2f%%", calcPct(part3Duration)),
-		"part4_scoring_time", part4Duration.String(),
-		"part4_pct", fmt.Sprintf("%.2f%%", calcPct(part4Duration)),
-		"total_e2e_time", totalDuration.String(),
-	)
-
-	if bestSong == "" {
-		a.respondError(w, http.StatusNotFound, "No matching song found")
-		return
-	}
-
-	var conf float64
-	if secondBestVotes == 0 {
-		conf = float64(firstBestVotes)
-	} else {
-		conf = float64(firstBestVotes) / float64(secondBestVotes)
-	}
-
-	a.respondJSON(w, http.StatusOK, IdentifyResponse{
-		SongID:     bestSong,
-		Confidence: conf,
-		TimeOffset: bestOffset,
+	a.respondJSON(c, http.StatusOK, IdentifyResponse{
+		SongID:     bestSongID,
+		Confidence: confidence,
+		TimeOffset: matchOffset,
+		Diagnostics: Diagnostics{
+			MatchScore:     int64(bestScore),
+			QueryHashes:    len(req.Fingerprints),
+			UniqueDBHashes: len(dbMap),
+			DecodeTimeMs:   decodeDuration.Milliseconds(),
+			ExtractTimeMs:  extractDuration.Milliseconds(),
+			DBQueryTimeMs:  dbQueryDuration.Milliseconds(),
+			StreamTimeMs:   streamDuration.Milliseconds(),
+			MatchTimeMs:    matchDuration.Milliseconds(),
+			TotalTimeMs:    totalDuration.Milliseconds(),
+		},
 	})
+
+	a.Logger.Info("HandleIdentify completed",
+		"song_id", bestSongID,
+		"match_score", bestScore,
+		"match_offset_sec", fmt.Sprintf("%.2f", matchOffset),
+		"confidence", fmt.Sprintf("%.3f", confidence),
+		"query_hashes", len(req.Fingerprints),
+		"unique_db_hashes", len(dbMap),
+		"timing_decode_ms", decodeDuration.Milliseconds(),
+		"timing_extract_ms", extractDuration.Milliseconds(),
+		"timing_db_query_ms", dbQueryDuration.Milliseconds(),
+		"timing_stream_ms", streamDuration.Milliseconds(),
+		"timing_match_ms", matchDuration.Milliseconds(),
+		"timing_total_ms", totalDuration.Milliseconds(),
+	)
 }
 
-// GET /songs/{id}/midi
-func (a *App) HandleGetMIDI(w http.ResponseWriter, r *http.Request) {
+// GET /api/v1/songs/:id/midi
+func (a *App) HandleGetMIDI(c *gin.Context) {
 	if a.PresignClient == nil {
-		a.respondError(w, http.StatusServiceUnavailable, "S3 storage is not configured")
+		a.respondError(c, http.StatusServiceUnavailable, "S3 storage is not configured")
 		return
 	}
-	
-	songID := chi.URLParam(r, "id")
+
+	songID := c.Param("id")
 	if songID == "" {
-		a.respondError(w, http.StatusBadRequest, "Missing song ID")
+		a.respondError(c, http.StatusBadRequest, "Missing song ID")
 		return
 	}
 
 	objectKey := fmt.Sprintf("midi/%s.mid", songID)
 
-	presignedReq, err := a.PresignClient.PresignGetObject(r.Context(), &s3.GetObjectInput{
+	presignedReq, err := a.PresignClient.PresignGetObject(c.Request.Context(), &s3.GetObjectInput{
 		Bucket: aws.String(a.Bucket),
 		Key:    aws.String(objectKey),
 	}, s3.WithPresignExpires(15*time.Minute))
 
 	if err != nil {
 		a.Logger.Error("Failed to generate presigned URL for MIDI", "song_id", songID, "err", err)
-		a.respondError(w, http.StatusInternalServerError, "Failed to generate download link")
+		a.respondError(c, http.StatusInternalServerError, "Failed to generate download link")
 		return
 	}
 
-	http.Redirect(w, r, presignedReq.URL, http.StatusFound)
+	c.Redirect(http.StatusFound, presignedReq.URL)
 }
 
-// GET /songs/{id}/constellation
-func (a *App) HandleGetConstellation(w http.ResponseWriter, r *http.Request) {
-	songID := chi.URLParam(r, "id")
+// GET /api/v1/songs/:id/constellation
+func (a *App) HandleGetConstellation(c *gin.Context) {
+	songID := c.Param("id")
 	if songID == "" {
-		a.respondError(w, http.StatusBadRequest, "Missing song ID")
+		a.respondError(c, http.StatusBadRequest, "Missing song ID")
 		return
 	}
 
 	objectKey := fmt.Sprintf("peaks/cm_%s.msgpack", songID)
 
-	presignedReq, err := a.PresignClient.PresignGetObject(r.Context(), &s3.GetObjectInput{
+	presignedReq, err := a.PresignClient.PresignGetObject(c.Request.Context(), &s3.GetObjectInput{
 		Bucket: aws.String(a.Bucket),
 		Key:    aws.String(objectKey),
 	}, s3.WithPresignExpires(15*time.Minute))
 
 	if err != nil {
 		a.Logger.Error("Failed to generate presigned URL for constellation", "song_id", songID, "err", err)
-		a.respondError(w, http.StatusInternalServerError, "Failed to generate download link")
+		a.respondError(c, http.StatusInternalServerError, "Failed to generate download link")
 		return
 	}
 
-	http.Redirect(w, r, presignedReq.URL, http.StatusFound)
+	c.Redirect(http.StatusFound, presignedReq.URL)
 }
 
-func (a *App) respondJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		a.Logger.Error("Failed to encode JSON response", "err", err)
-	}
+// Wrapper for successful JSON responses
+func (a *App) respondJSON(c *gin.Context, status int, data interface{}) {
+	c.JSON(status, data)
 }
 
-func (a *App) respondError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(APIError{
+// Wrapper for Error JSON responses
+func (a *App) respondError(c *gin.Context, status int, message string) {
+	c.JSON(status, APIError{
 		Error: message,
 	})
 }

@@ -24,9 +24,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/zeebo/xxh3"
 
-	"spectralspy/db"
-	"spectralspy/pkg/SpectralSpy"
-	"spectralspy/server"
+	"github.com/adsrx222/SpectralSpy/db"
+	"github.com/adsrx222/SpectralSpy/SpectralSpy"
 )
 
 // MaestroDataframe maps the JSON structure of the dataset.
@@ -195,7 +194,7 @@ func ResampleAudio(signal []float64, rateMultiplier float64) []float64 {
 	return resampled
 }
 
-func GetContinuousSwath(fingerprints []server.Fingerprint, maxLen int) []server.Fingerprint {
+func GetContinuousSwath(fingerprints []SpectralSpy.Fingerprint, maxLen int) []SpectralSpy.Fingerprint {
 	if len(fingerprints) <= maxLen {
 		return fingerprints
 	}

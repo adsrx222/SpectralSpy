@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,39 +177,71 @@ func RecalculateBM25Weights(ctx context.Context, db *sql.DB) error {
 	defer tx.Rollback()
 
 	var totalSongs float64
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM songs`).Scan(&totalSongs)
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT song_id) FROM audio_hashes`).Scan(&totalSongs)
 	if err != nil {
-		return fmt.Errorf("count total songs: %w", err)
+		return fmt.Errorf("count total distinct songs: %w", err)
 	}
 
 	if totalSongs == 0 {
 		return nil
 	}
 
-	// 1. Clear out old weights
+	// 1. Compute track_count per hash in Go (portable across drivers)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT hash, COUNT(DISTINCT song_id) as track_count
+		FROM audio_hashes
+		GROUP BY hash
+	`)
+	if err != nil {
+		return fmt.Errorf("query hash track counts: %w", err)
+	}
+
+	type hashCount struct {
+		hash       int64
+		trackCount float64
+	}
+	var counts []hashCount
+
+	for rows.Next() {
+		var hc hashCount
+		if err := rows.Scan(&hc.hash, &hc.trackCount); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan hash track count: %w", err)
+		}
+		counts = append(counts, hc)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate hash track counts: %w", err)
+	}
+	rows.Close()
+
+	// 2. Clear out old weights
 	if _, err := tx.ExecContext(ctx, `DELETE FROM hash_weight`); err != nil {
 		return fmt.Errorf("clear hash_weight: %w", err)
 	}
 
-	// 2. Group by hash, calculate track_count, and insert the BM25 formula directly
-	// BM25 = \ln( 1 + (N - track_count + 0.5) / (track_count + 0.5) )
-	query := `
+	// 3. Insert freshly computed BM25 weights, one row at a time via
+	// prepared statement. math.Log is the Go stdlib equivalent of SQL LN().
+	insertStmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO hash_weight (hash, track_count, weight)
-		SELECT 
-			hash, 
-			COUNT(DISTINCT song_id) as track_count,
-			LN(1.0 + ((? - COUNT(DISTINCT song_id) + 0.5) / (COUNT(DISTINCT song_id) + 0.5))) as weight
-		FROM audio_hashes
-		GROUP BY hash
-	`
-	
-	result, err := tx.ExecContext(ctx, query, totalSongs)
+		VALUES (?, ?, ?)
+	`)
 	if err != nil {
-		return fmt.Errorf("insert bm25 weights: %w", err)
+		return fmt.Errorf("prepare hash_weight insert: %w", err)
+	}
+	defer insertStmt.Close()
+
+	for _, hc := range counts {
+		// BM25 IDF-style weight: rarer hashes (low track_count) score higher.
+		weight := math.Log(1.0 + ((totalSongs - hc.trackCount + 0.5) / (hc.trackCount + 0.5)))
+
+		if _, err := insertStmt.ExecContext(ctx, hc.hash, int64(hc.trackCount), weight); err != nil {
+			return fmt.Errorf("insert weight for hash %d: %w", hc.hash, err)
+		}
 	}
 
-	rowsAffected, _ := result.RowsAffected()
-	fmt.Printf("BM25 Weights Recalculated for %d unique hashes!\n", rowsAffected)
+	fmt.Printf("BM25 Weights Recalculated for %d unique hashes!\n", len(counts))
 
 	return tx.Commit()
 }

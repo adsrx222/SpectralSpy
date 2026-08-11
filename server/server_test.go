@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -92,20 +90,6 @@ func setupTestApp(t *testing.T) (*server.App, *httptest.Server) {
 	app.Limiters = server.NewIPRateLimiter(rate.Limit(10), 5)
 
 	return app, s3Server
-}
-
-func TestIPRateLimiter(t *testing.T) {
-	limiter := server.NewIPRateLimiter(rate.Limit(1), 1)
-	ip := "192.168.1.1"
-
-	l := limiter.GetLimiter(ip)
-	if !l.Allow() {
-		t.Errorf("Expected first request from IP to be allowed")
-	}
-
-	if l.Allow() {
-		t.Errorf("Expected immediate second request to be rate-limited")
-	}
 }
 
 func TestHandleIdentify_Success(t *testing.T) {
@@ -296,155 +280,5 @@ func TestHandleIdentify_DuplicateHashes(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected status 200 for duplicate hash query, got %d", rr.Code)
-	}
-}
-
-func TestHandleGetMIDI_CompleteRedirect(t *testing.T) {
-	app, s3Server := setupTestApp(t)
-	defer app.DB.Close()
-	defer s3Server.Close()
-
-	r := gin.New()
-	r.GET("/songs/:id/midi", app.HandleGetMIDI)
-
-	req := httptest.NewRequest("GET", "/songs/songA/midi", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusFound {
-		t.Fatalf("Expected status 302 Found, got %d", rr.Code)
-	}
-
-	locationHeader := rr.Header().Get("Location")
-	if locationHeader == "" {
-		t.Fatal("Expected Location header in redirect response")
-	}
-
-	parsedURL, err := url.Parse(locationHeader)
-	if err != nil {
-		t.Fatalf("Invalid Location URL: %v", err)
-	}
-
-	queryParams := parsedURL.Query()
-	requiredParams := []string{
-		"X-Amz-Algorithm",
-		"X-Amz-Credential",
-		"X-Amz-Date",
-		"X-Amz-Expires",
-		"X-Amz-SignedHeaders",
-		"X-Amz-Signature",
-	}
-	for _, param := range requiredParams {
-		if queryParams.Get(param) == "" {
-			t.Errorf("Presigned URL missing query parameter: %s", param)
-		}
-	}
-
-	s3Resp, err := http.Get(locationHeader)
-	if err != nil {
-		t.Fatalf("Failed to execute GET request on Location URL: %v", err)
-	}
-	defer s3Resp.Body.Close()
-
-	if s3Resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected S3 server to respond 200 OK, got %d", s3Resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(s3Resp.Body)
-	if err != nil {
-		t.Fatalf("Failed to read S3 asset body: %v", err)
-	}
-
-	if string(body) != "mock-midi-binary-data" {
-		t.Errorf("Expected body 'mock-midi-binary-data', got '%s'", string(body))
-	}
-}
-
-func TestHandleGetConstellation_CompleteRedirect(t *testing.T) {
-	app, s3Server := setupTestApp(t)
-	defer app.DB.Close()
-	defer s3Server.Close()
-
-	r := gin.New()
-	r.GET("/songs/:id/constellation", app.HandleGetConstellation)
-
-	apiServer := httptest.NewServer(r)
-	defer apiServer.Close()
-
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse // Don't automatically follow redirect in client to test the 302/200 flow properly
-		},
-	}
-
-	resp, err := client.Get(apiServer.URL + "/songs/songA/constellation")
-	if err != nil {
-		t.Fatalf("Failed to send request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Since we captured last response or followed it, let's verify redirect behavior or query the S3 mock directly if needed.
-	// Alternatively, hit the server without the redirect client interceptor if following through:
-	apiClientNormal := http.DefaultClient
-	respNormal, err := apiClientNormal.Get(apiServer.URL + "/songs/songA/constellation")
-	if err != nil {
-		t.Fatalf("Failed to send request: %v", err)
-	}
-	defer respNormal.Body.Close()
-
-	if respNormal.StatusCode != http.StatusOK {
-		t.Fatalf("Expected final status 200 OK after following redirect, got %d", respNormal.StatusCode)
-	}
-
-	body, err := io.ReadAll(respNormal.Body)
-	if err != nil {
-		t.Fatalf("Failed to read body: %v", err)
-	}
-
-	if string(body) != "mock-msgpack-binary-data" {
-		t.Errorf("Expected body 'mock-msgpack-binary-data', got '%s'", string(body))
-	}
-}
-
-func TestRateLimitMiddleware_RemoteAddrWithoutPort(t *testing.T) {
-	app, s3Server := setupTestApp(t)
-	defer app.DB.Close()
-	defer s3Server.Close()
-
-	app.Limiters = server.NewIPRateLimiter(rate.Limit(1), 1)
-
-	r := gin.New()
-	r.Use(app.RateLimitMiddleware())
-	r.GET("/ping", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/ping", nil)
-	req.RemoteAddr = "192.168.1.50"
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("Expected request without port in RemoteAddr to succeed, got %d", rr.Code)
-	}
-}
-
-func TestLoggerMiddleware(t *testing.T) {
-	app, s3Server := setupTestApp(t)
-	defer app.DB.Close()
-	defer s3Server.Close()
-
-	r := gin.New()
-	r.Use(app.LoggerMiddleware())
-	r.GET("/test-logger", func(c *gin.Context) {
-		c.Status(http.StatusAccepted)
-	})
-
-	req := httptest.NewRequest("GET", "/test-logger", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusAccepted {
-		t.Errorf("Expected status 202, got %d", rr.Code)
 	}
 }

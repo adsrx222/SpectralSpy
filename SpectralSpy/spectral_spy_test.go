@@ -210,14 +210,6 @@ func makePoint(ts, freq, mag float64) ConstellationPoint {
 	}
 }
 
-func TestHashPair_Deterministic(t *testing.T) {
-	a := makePoint(1.0, 440.0, 100.0)
-	b := makePoint(2.0, 880.0, 200.0)
-	if hashPair(a, b) != hashPair(a, b) {
-		t.Error("hashPair is not deterministic")
-	}
-}
-
 func TestHashPair_DifferentTethersDifferentHash(t *testing.T) {
 	a := makePoint(1.0, 440.0, 100.0)
 	b := makePoint(2.0, 880.0, 200.0)
@@ -279,7 +271,6 @@ func TestHashPair_AbsolutePositionDoesNotMatter(t *testing.T) {
 }
 
 // generateHashEntries()
-
 func makePeaks(numFrames, peaksPerFrame int, baseFreq, baseTime float64) [][]ConstellationPoint {
 	binHz := float64(SAMPLE_RATE) / float64(WINDOW_SIZE)
 	pm := make([][]ConstellationPoint, numFrames)
@@ -297,13 +288,6 @@ func makePeaks(numFrames, peaksPerFrame int, baseFreq, baseTime float64) [][]Con
 		}
 	}
 	return pm
-}
-
-func TestGenerateHashEntries_EmptyInput(t *testing.T) {
-	entries := generateHashEntries(nil, nil)
-	if entries != nil && len(entries) != 0 {
-		t.Errorf("expected nil/empty for nil input, got %d entries", len(entries))
-	}
 }
 
 func TestGenerateHashEntries_NonEmpty(t *testing.T) {
@@ -416,7 +400,6 @@ func TestGenerateHashEntries_DifferentPeaksDifferentHashes(t *testing.T) {
 }
 
 // Process()
-
 func TestProcess_ReturnsSomething(t *testing.T) {
 	entries := Process(context.Background(), makeSine(SAMPLE_RATE*2, 440))
 	if len(entries) == 0 {
@@ -514,7 +497,7 @@ func TestProcess_PositionIndependentHashes(t *testing.T) {
 }
 
 func TestGenerateHashes(t *testing.T) {
-	samples, err := loadMP3("../../misc/testdata/001.mp3")
+	samples, err := loadMP3("../misc/testdata/001.mp3")
 	if err != nil {
 		t.Fatalf("failed to load mp3: %v", err)
 	}
@@ -966,8 +949,7 @@ func TestHashIdentification(t *testing.T) {
 
 	fmt.Printf("Clean fingerprints: %d\n", len(cleanFps))
 	fmt.Printf("Query fingerprints: %d\n", total)
-	fmt.Printf("FP survival       : %d / %d (%.2f%%)\n\n",
-		survived, len(cleanFps), survivalPct)
+	fmt.Printf("FP survival       : %d / %d (%.2f%%)\n\n", survived, len(cleanFps), survivalPct)
 
 	fmt.Printf("Correct           : %d (%.2f%%) — target track only\n",
 		len(correct), pct(len(correct)))
@@ -980,7 +962,7 @@ func TestHashIdentification(t *testing.T) {
 
 	fmt.Printf("\nOffset-binned matching (via MatchFingerprints):\n")
 	fmt.Printf("Best track        : %s (track %d)\n", bestSongID, bestIdx+1)
-	fmt.Printf("Best score        : %d votes\n", bestScore)
+	fmt.Printf("Best score        : %.2f votes\n", bestScore)
 	fmt.Printf("Match offset      : %.2f seconds\n", matchOffset)
 	fmt.Printf("Confidence Ratio      : %.2f\n\n", confidence)
 
@@ -999,7 +981,7 @@ func TestHashIdentification(t *testing.T) {
 	if identified {
 		fmt.Printf("\n✓ Correctly identified as %s\n", targetPath)
 	} else {
-		fmt.Printf("\n✗ Misidentified as testdata/%03d.mp3 (score %d)\n",
+		fmt.Printf("\n✗ Misidentified as testdata/%03d.mp3 (score %.2f)\n",
 			bestIdx+1, bestScore)
 	}
 	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")

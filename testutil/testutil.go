@@ -4,38 +4,23 @@ import (
 	"archive/zip"
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"math/rand"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-audio/audio"
 	"github.com/go-audio/wav"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/zeebo/xxh3"
 
 	"github.com/adsrx222/SpectralSpy/db"
 	"github.com/adsrx222/SpectralSpy/SpectralSpy"
 )
-
-// MaestroDataframe maps the JSON structure of the dataset.
-type MaestroDataframe struct {
-	CanonicalComposer map[string]string `json:"canonical_composer"`
-	CanonicalTitle    map[string]string `json:"canonical_title"`
-	Year              map[string]int    `json:"year"`
-	MidiFilename      map[string]string `json:"midi_filename"`
-	AudioFilename     map[string]string `json:"audio_filename"`
-}
 
 type Stats struct {
 	Count  int     `json:"count"`
@@ -226,16 +211,6 @@ func SetupTestDB(t *testing.T, dbPath string) *sql.DB {
 	return dbConn
 }
 
-func SetupMockS3(t *testing.T) *httptest.Server {
-	if t != nil {
-		t.Helper()
-	}
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mock data"))
-	}))
-}
-
 func DecodeWavToFloat64(r io.Reader) ([]float64, error) {
 	rs, ok := r.(io.ReadSeeker)
 	if !ok {
@@ -299,115 +274,6 @@ func DecodeWavToFloat64(r io.Reader) ([]float64, error) {
 	return samples, nil
 }
 
-func GetRandomMaestroSong(workspaceDir string) ([]float64, string, error) {
-	jsonPath := filepath.Join(workspaceDir, "maestro-v3.0.0.json")
-	file, err := os.ReadFile(jsonPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("reading json: %w", err)
-	}
-
-	var df MaestroDataframe
-	if err := json.Unmarshal(file, &df); err != nil {
-		return nil, "", fmt.Errorf("unmarshaling json dataframe: %w", err)
-	}
-
-	var keys []string
-	for k := range df.AudioFilename {
-		keys = append(keys, k)
-	}
-	if len(keys) == 0 {
-		return nil, "", fmt.Errorf("no songs found in maestro JSON")
-	}
-
-	rand.Seed(time.Now().UnixNano())
-	randomKey := keys[rand.Intn(len(keys))]
-	wavPath := df.AudioFilename[randomKey]
-
-	hash64 := xxh3.HashString(wavPath)
-	songID := strconv.FormatUint(hash64, 36)
-
-	// check if the WAV file is already extracted on disk
-	extractedPath := filepath.Join(workspaceDir, wavPath)
-	if wavFile, err := os.Open(extractedPath); err == nil {
-		fmt.Printf("  [testutil] Reading pre-extracted WAV directly from disk: %s\n", extractedPath)
-		defer wavFile.Close()
-		samples, err := DecodeWavToFloat64(wavFile)
-		if err != nil {
-			return nil, "", fmt.Errorf("decoding cached wav: %w", err)
-		}
-		return samples, songID, nil
-	}
-
-	// extract single target file to disk cache
-	fmt.Printf("  [testutil] Unzipping target track to disk cache: %s\n", wavPath)
-	zipPath := filepath.Join(workspaceDir, "maestro-v3.0.0.zip")
-	zr, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("opening audio zip: %w", err)
-	}
-	defer zr.Close()
-
-	for _, f := range zr.File {
-		if strings.HasSuffix(f.Name, wavPath) {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, "", fmt.Errorf("opening wav %s from zip: %w", f.Name, err)
-			}
-			defer rc.Close()
-
-			if err := os.MkdirAll(filepath.Dir(extractedPath), 0755); err != nil {
-				return nil, "", fmt.Errorf("creating dirs for extracted wav: %w", err)
-			}
-
-			outFn, err := os.Create(extractedPath)
-			if err != nil {
-				return nil, "", fmt.Errorf("creating extracted wav file: %w", err)
-			}
-
-			if _, err := io.Copy(outFn, rc); err != nil {
-				outFn.Close()
-				return nil, "", fmt.Errorf("writing extracted wav file: %w", err)
-			}
-			outFn.Close()
-
-			wavFile, err := os.Open(extractedPath)
-			if err != nil {
-				return nil, "", fmt.Errorf("opening newly extracted wav file: %w", err)
-			}
-			defer wavFile.Close()
-
-			samples, err := DecodeWavToFloat64(wavFile)
-			if err != nil {
-				return nil, "", fmt.Errorf("decoding wav: %w", err)
-			}
-			return samples, songID, nil
-		}
-	}
-
-	return nil, "", fmt.Errorf("wav file %s not found in archive", wavPath)
-}
-
-func GetStratumKey(composer, title string, year int) string {
-	genre := composer
-	
-	instrumentation := "modern"
-	if year < 2008 {
-		instrumentation = "early"
-	} else if year < 2014 {
-		instrumentation = "mid"
-	}
-
-	titleLower := strings.ToLower(title)
-	tempo := "medium"
-	if strings.Contains(titleLower, "allegro") || strings.Contains(titleLower, "presto") || strings.Contains(titleLower, "vivace") || strings.Contains(titleLower, "scherzo") {
-		tempo = "fast"
-	} else if strings.Contains(titleLower, "adagio") || strings.Contains(titleLower, "andante") || strings.Contains(titleLower, "lento") || strings.Contains(titleLower, "grave") {
-		tempo = "slow"
-	}
-	
-	return fmt.Sprintf("%s|%s|%s", genre, instrumentation, tempo)
-}
-
 func GenerateSilence(durationSec float64, sampleRate int) []float64 {
 	length := int(durationSec * float64(sampleRate))
 	return make([]float64, length)
@@ -432,80 +298,6 @@ func GenerateRepetitiveKickDrum(durationSec float64, sampleRate int) []float64 {
 		}
 	}
 	return samples
-}
-
-func StratifiedSampleMaestro(workspaceDir string, samplePercentage float64) ([]SongMetadataInfo, error) {
-	jsonPath := filepath.Join(workspaceDir, "maestro-v3.0.0.json")
-	file, err := os.ReadFile(jsonPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading json: %w", err)
-	}
-
-	var df MaestroDataframe
-	if err := json.Unmarshal(file, &df); err != nil {
-		return nil, fmt.Errorf("unmarshaling json dataframe: %w", err)
-	}
-
-	// group songs by stratum key
-	groups := make(map[string][]SongMetadataInfo)
-	for key, audioPath := range df.AudioFilename {
-		composer := df.CanonicalComposer[key]
-		title := df.CanonicalTitle[key]
-		year := df.Year[key]
-		midiPath := df.MidiFilename[key]
-		
-		hash64 := xxh3.HashString(audioPath)
-		songID := strconv.FormatUint(hash64, 36)
-
-		song := SongMetadataInfo{
-			SongID:        songID,
-			Artist:        composer,
-			Title:         title,
-			Year:          year,
-			MidiFilename:  midiPath,
-			AudioFilename: audioPath,
-			IsNoise:       false,
-		}
-
-		stratum := GetStratumKey(composer, title, year)
-		groups[stratum] = append(groups[stratum], song)
-	}
-
-	var sampled []SongMetadataInfo
-	rng := rand.New(rand.NewSource(42))
-
-	for _, songs := range groups {
-		groupSize := len(songs)
-		sampleCount := int(math.Round(float64(groupSize) * samplePercentage))
-		if sampleCount < 1 && groupSize > 0 {
-			sampleCount = 1
-		}
-		
-		indices := rng.Perm(groupSize)
-		for idx := 0; idx < sampleCount && idx < groupSize; idx++ {
-			sampled = append(sampled, songs[indices[idx]])
-		}
-	}
-
-	noiseTracks := []SongMetadataInfo{
-		{
-			SongID:    "noise_silence",
-			Artist:    "Synthetic",
-			Title:     "Classical Silence",
-			IsNoise:   true,
-			NoiseType: "silence",
-		},
-		{
-			SongID:    "noise_kickdrum",
-			Artist:    "Synthetic",
-			Title:     "Electronic Kick Drums",
-			IsNoise:   true,
-			NoiseType: "kick_drum",
-		},
-	}
-	sampled = append(sampled, noiseTracks...)
-
-	return sampled, nil
 }
 
 func GetAudioForTrack(workspaceDir string, track SongMetadataInfo) ([]float64, error) {

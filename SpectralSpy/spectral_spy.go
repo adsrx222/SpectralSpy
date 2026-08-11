@@ -392,109 +392,97 @@ func ProcessWithMetrics(ctx context.Context, samples []float64) ([]Fingerprint, 
 	return entries, metrics
 }
 
-// func MatchFingerprints(queryFps []Fingerprint, db map[uint64][]DBEntry) (string, uint64, float64, float64) {
-// 	hist := make(map[OffsetKey]uint64)
-// 	songTotals := make(map[string]uint64)
+func MatchFingerprints(queryFps []Fingerprint, db map[uint64][]DBEntry) (string, float64, float64, float64) {
+	numFPs := len(queryFps)
+	if numFPs == 0 {
+		return "", 0.0, 0.0, 0.0
+	}
+	
+	numWorkers := runtime.GOMAXPROCS(0)
+	framesPerWorker := (numFPs + numWorkers - 1) / numWorkers
 
-// 	for _, qfp := range queryFps {
-// 		dbEntries := db[qfp.Hash]
-// 		if len(dbEntries) == 0 {
-// 			continue
-// 		}
+	histResults := make([]map[OffsetKey]float64, numWorkers)
+	var wg sync.WaitGroup
 
-// 		for _, de := range dbEntries {
-// 			rawOffset := de.AnchorTime - qfp.AnchorTime
-// 			bin := uint64(math.Round(rawOffset / float64(HOP_SIZE)))
-
-// 			key := OffsetKey{
-// 				SongID: de.SongID,
-// 				Bin:    bin,
-// 			}
-
-// 			hist[key]++
-// 			songTotals[de.SongID]++
-// 		}
-// 	}
-
-// 	// Early exit if no matching fingerprints were found
-// 	if len(songTotals) == 0 {
-// 		return "", 0, 0.0, 0.0
-// 	}
-
-// 	// 1. Find the most common track (SongID) overall
-// 	var bestSongID string
-// 	var maxSongTotal uint64
-// 	for songID, total := range songTotals {
-// 		if total > maxSongTotal {
-// 			maxSongTotal = total
-// 			bestSongID = songID
-// 		}
-// 	}
-
-// 	// 2. Find the most common bin combo for the winning SongID
-// 	var bestBin uint64
-// 	var bestScore uint64
-// 	var secondBestScore uint64
-
-// 	for key, count := range hist {
-// 		if key.SongID == bestSongID {
-// 			if count > bestScore {
-// 				secondBestScore = bestScore
-// 				bestScore = count
-// 				bestBin = key.Bin
-// 			} else if count > secondBestScore {
-// 				secondBestScore = count
-// 			}
-// 		}
-// 	}
-
-// 	// 3. Compute confidence ratio safely to prevent zero-division or index panics
-// 	var confidenceRatio float64
-// 	if secondBestScore > 0 {
-// 		confidenceRatio = float64(bestScore) / float64(secondBestScore)
-// 	} else {
-// 		confidenceRatio = float64(bestScore)
-// 	}
-
-// 	timeOffset := float64(bestBin) * float64(HOP_SIZE) / float64(SAMPLE_RATE)
-// 	return bestSongID, bestScore, timeOffset, confidenceRatio
-// }
-
-func MatchFingerprints(queryFps []Fingerprint, db map[uint64][]DBEntry) (string, uint64, float64, float64) {
-	hist := make(map[OffsetKey]uint64)
-	songTotals := make(map[string]uint64)
-
-	for _, qfp := range queryFps {
-		dbEntries := db[qfp.Hash]
-		if len(dbEntries) == 0 {
-			continue
+	for w := 0; w < numWorkers; w++ {
+		start := w * framesPerWorker
+		end := min(start+framesPerWorker, numFPs)
+		if start >= numFPs {
+			break
 		}
+		
+		invHop := 1.0 / float64(HOP_SIZE)
+		wg.Add(1)
 
-		for _, de := range dbEntries {
-			rawOffset := de.AnchorTime - qfp.AnchorTime
-			bin := uint64(math.Round(rawOffset / float64(HOP_SIZE)))
+		go func(start, end, workerID int) {
+			defer wg.Done()
 
-			key := OffsetKey{
-				SongID: de.SongID,
-				Bin:    bin,
+			localHist := make(map[OffsetKey]float64, (end-start)*10)
+			for _, qfp := range queryFps[start:end] {
+				dbEntries, ok := db[qfp.Hash]
+				if !ok || len(dbEntries) == 0 {
+					continue
+				}
+
+				for i := 0; i < len(dbEntries); i++ {
+					de := &dbEntries[i]
+
+					rawOffset := de.AnchorTime - qfp.AnchorTime
+					val := rawOffset * invHop
+
+					// fast rounding reduces complexity
+					var bin int64
+					if val < 0 {
+						bin = int64(val - 0.5)
+					} else {
+						bin = int64(val + 0.5)
+					}
+
+					key := OffsetKey{
+						SongID: de.SongID,
+						Bin:    uint64(bin),
+					}
+
+					localHist[key] += de.Weight
+				}
 			}
 
-			hist[key]++
-			songTotals[de.SongID]++
+			histResults[workerID] = localHist
+		}(start, end, w)
+	}
+
+	wg.Wait()
+
+	totalCap := 0
+	for _, hist := range histResults {
+		if hist != nil {
+			totalCap += len(hist)
 		}
 	}
 
-	// Early exit if no matching fingerprints were found
-	if len(songTotals) == 0 {
-		return "", 0, 0.0, 0.0
+	globalHist := make(map[OffsetKey]float64, totalCap)
+	for _, hist := range histResults {
+		for key, w := range hist {
+			globalHist[key] += w
+		}
 	}
 
-	// 1. Find the 1st and 2nd choice tracks (SongID) by overall vote count
-	var bestSongID string
-	var bestSongTotal uint64
-	var secondBestSongTotal uint64
+	if len(globalHist) == 0 {
+		return "", 0.0, 0.0, 0.0
+	}
 
-	for songID, total := range songTotals {
+	// amalgamate worker histograms
+	globalSongs := make(map[string]float64)
+	for key, w := range globalHist {
+		globalSongs[key.SongID] += w
+	}
+
+	// determine 1st & 2nd song votes
+	var bestSongID string
+	var bestSongTotal float64
+	var secondBestSongTotal float64
+
+	for songID, total := range globalSongs {
 		if total > bestSongTotal {
 			secondBestSongTotal = bestSongTotal
 			bestSongTotal = total
@@ -504,25 +492,25 @@ func MatchFingerprints(queryFps []Fingerprint, db map[uint64][]DBEntry) (string,
 		}
 	}
 
-	// 2. Find the most common bin combo for the winning SongID
-	var bestBin uint64
-	var bestScore uint64
+	// determine best fitting bin
+	var bestBin int64
+	var bestScore float64
 
-	for key, count := range hist {
+	for key, count := range globalHist {
 		if key.SongID == bestSongID {
 			if count > bestScore {
 				bestScore = count
-				bestBin = key.Bin
+				bestBin = int64(key.Bin)
 			}
 		}
 	}
 
-	// 3. Compute confidence ratio (1st choice track votes / 2nd choice track votes)
+	// compute confidence ratio & time offset
 	var confidenceRatio float64
 	if secondBestSongTotal > 0 {
-		confidenceRatio = float64(bestSongTotal) / float64(secondBestSongTotal)
+		confidenceRatio = bestSongTotal / secondBestSongTotal
 	} else {
-		confidenceRatio = float64(bestSongTotal)
+		confidenceRatio = bestSongTotal
 	}
 
 	timeOffset := float64(bestBin) * float64(HOP_SIZE) / float64(SAMPLE_RATE)

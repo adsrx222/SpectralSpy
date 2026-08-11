@@ -2,67 +2,47 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"math"
+	"strconv"
 	"syscall/js"
 
 	"github.com/adsrx222/SpectralSpy/SpectralSpy"
 )
 
-// processAudioWasm receives the audio buffer from JavaScript
-func processAudioWasm(this js.Value, args []js.Value) any {
+func processSamples(this js.Value, args []js.Value) any {
+	// ensure the frontend passed the sample array
 	if len(args) < 1 {
-		return `{"error": "No audio data provided by JavaScript"}`
+		return js.ValueOf("Error: Missing float64 audio samples array")
 	}
 
-	jsData := args[0]
-	length := jsData.Get("length").Int()
+	jsSamples := args[0]
+	length := jsSamples.Get("length").Int()
+	samples := make([]float64, length)
 
-	// Create a Go byte slice to hold the raw memory buffer from JS
-	byteData := make([]byte, length)
+	// translate js Float64Array into a native Go []float64 slice
+	for i := 0; i < length; i++ {
+		samples[i] = jsSamples.Index(i).Float()
+	}
+
+	fingerprints := SpectralSpy.Process(context.Background(), samples)
+
+	// initialize a JavaScript Array to hold the returned fingerprints
+	jsResult := js.Global().Get("Array").New(len(fingerprints))
 	
-	// Copy the Uint8Array data from JS into Go memory securely
-	js.CopyBytesToGo(byteData, jsData)
-
-	// Reconstruct the raw bytes into float64s. 
-	numSamples := length / 8
-	samples := make([]float64, numSamples)
-
-	for i := 0; i < numSamples; i++ {
-		// JavaScript's Float64Array uses Little-Endian byte order. 
-		bits := uint64(byteData[i*8]) |
-			uint64(byteData[i*8+1])<<8 |
-			uint64(byteData[i*8+2])<<16 |
-			uint64(byteData[i*8+3])<<24 |
-			uint64(byteData[i*8+4])<<32 |
-			uint64(byteData[i*8+5])<<40 |
-			uint64(byteData[i*8+6])<<48 |
-			uint64(byteData[i*8+7])<<56
+	for i, fp := range fingerprints {
+		jsObj := js.Global().Get("Object").New()
 		
-		samples[i] = math.Float64frombits(bits)
+		// Convert the uint64 hash to a string
+		jsObj.Set("hash", strconv.FormatUint(fp.Hash, 10))
+		jsObj.Set("anchor_time", fp.AnchorTime)
+		
+		jsResult.SetIndex(i, jsObj)
 	}
 
-	// Run the actual fingerprinting algorithm.
-	// FIX: Use the blank identifier '_' to ignore the constellation points array
-	hashes, _ := SpectralSpy.ProcessWithPeaks(context.Background(), samples)
-
-	// Serialize to JSON and return it across the WASM boundary to JS
-	jsonBytes, marshalErr := json.Marshal(hashes)
-	if marshalErr != nil {
-		return fmt.Sprintf(`{"error": "Failed to marshal JSON: %v"}`, marshalErr)
-	}
-
-	return string(jsonBytes)
+	return jsResult
 }
 
 func main() {
-	// A channel to keep the Go WASM process alive indefinitely
 	c := make(chan struct{}, 0)
-	
-	// Export the Go function to the global JavaScript 'window' object
-	js.Global().Set("processAudioWasm", js.FuncOf(processAudioWasm))
-	
-	fmt.Println("Go WebAssembly Module Initialized.")
+	js.Global().Set("processAudioSamples", js.FuncOf(processSamples))
 	<-c
 }

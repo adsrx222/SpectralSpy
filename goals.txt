@@ -1,0 +1,3 @@
+SELECT * 
+FROM hash_weight 
+LIMIT 50;

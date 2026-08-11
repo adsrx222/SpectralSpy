@@ -1,0 +1,72 @@
+[
+  {
+    "bitrate": 256,
+    "number_of_trials": 30,
+    "hash_survival": 0.9607843137254902,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 8496.040055054267,
+    "aggregate_statistics": {
+      "hashrate_max": 16694.49081803005,
+      "hashrate_min": 1479.974100453242,
+      "survival_max": 0.9607843137254902,
+      "survival_min": 0.9607843137254902
+    }
+  },
+  {
+    "bitrate": 160,
+    "number_of_trials": 30,
+    "hash_survival": 0.9607843137254902,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 5276.9594167923115,
+    "aggregate_statistics": {
+      "hashrate_max": 9945.269119920618,
+      "hashrate_min": 2344.7480386846264,
+      "survival_max": 0.9607843137254902,
+      "survival_min": 0.9607843137254902
+    }
+  },
+  {
+    "bitrate": 96,
+    "number_of_trials": 30,
+    "hash_survival": 0.6274509803921567,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 4924.567092058932,
+    "aggregate_statistics": {
+      "hashrate_max": 12711.276615617075,
+      "hashrate_min": 1575.7899469260244,
+      "survival_max": 0.6274509803921569,
+      "survival_min": 0.6274509803921569
+    }
+  },
+  {
+    "bitrate": 48,
+    "number_of_trials": 30,
+    "hash_survival": 0.6078431372549019,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 4322.488722259108,
+    "aggregate_statistics": {
+      "hashrate_max": 9214.821210583315,
+      "hashrate_min": 1063.2559683481456,
+      "survival_max": 0.6078431372549019,
+      "survival_min": 0.6078431372549019
+    }
+  },
+  {
+    "bitrate": 16,
+    "number_of_trials": 30,
+    "hash_survival": 0.6470588235294118,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 8910.413184579238,
+    "aggregate_statistics": {
+      "hashrate_max": 23924.242797715455,
+      "hashrate_min": 1497.289022108289,
+      "survival_max": 0.6470588235294118,
+      "survival_min": 0.6470588235294118
+    }
+  }
+]

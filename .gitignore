@@ -1,6 +1,3 @@
 .env
-misc/testdata
-misc/workspace
-checklist.md
-design.md
 live-demo/workspace
+.venv

@@ -1,0 +1,58 @@
+[
+  {
+    "eq_category": "Subtle",
+    "gain": -0.36804183740477053,
+    "q_width": 0.7,
+    "number_of_trials": 30,
+    "hash_survival": 0.9843137254901961,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 6105.476257902724,
+    "aggregate_statistics": {
+      "survival_max": 1,
+      "survival_min": 0.9215686274509803
+    }
+  },
+  {
+    "eq_category": "Moderate",
+    "gain": -0.6220741824982307,
+    "q_width": 1.4,
+    "number_of_trials": 30,
+    "hash_survival": 0.9640522875816994,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 5109.259943518089,
+    "aggregate_statistics": {
+      "survival_max": 1,
+      "survival_min": 0.8823529411764706
+    }
+  },
+  {
+    "eq_category": "Extreme",
+    "gain": 0.4008856697599087,
+    "q_width": 3,
+    "number_of_trials": 30,
+    "hash_survival": 0.9496732026143792,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 6496.833213051778,
+    "aggregate_statistics": {
+      "survival_max": 1,
+      "survival_min": 0.803921568627451
+    }
+  },
+  {
+    "eq_category": "Surgical",
+    "gain": -25.377329220223363,
+    "q_width": 10,
+    "number_of_trials": 30,
+    "hash_survival": 0.8836601307189546,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 6474.968438954577,
+    "aggregate_statistics": {
+      "survival_max": 1,
+      "survival_min": 0.7843137254901961
+    }
+  }
+]

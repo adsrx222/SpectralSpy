@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/adsrx222/SpectralSpy/data"
+	"github.com/adsrx222/SpectralSpy/src"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -26,7 +26,7 @@ func main() {
 	ctx := context.Background()
 	
 	// Execute the Run function from data_processing.go
-	if err := data.Run(ctx, db); err != nil {
+	if err := SpectralSpy.RunDP(ctx, db); err != nil {
 		log.Fatalf("Data processing failed: %v", err)
 	}
 

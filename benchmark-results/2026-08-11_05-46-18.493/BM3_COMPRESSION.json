@@ -1,0 +1,44 @@
+[
+  {
+    "compression_category": "Low Compression",
+    "ratio": 1.7227668749078624,
+    "threshold": -15.173449605393829,
+    "number_of_trials": 30,
+    "hash_survival": 0.7411764705882357,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 6098.098418191471,
+    "aggregate_statistics": {
+      "survival_max": 0.803921568627451,
+      "survival_min": 0.6274509803921569
+    }
+  },
+  {
+    "compression_category": "Medium Compression",
+    "ratio": 3.9357509017471926,
+    "threshold": -21.300089941470006,
+    "number_of_trials": 30,
+    "hash_survival": 0.5320261437908496,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 7119.8910873528885,
+    "aggregate_statistics": {
+      "survival_max": 0.6078431372549019,
+      "survival_min": 0.47058823529411764
+    }
+  },
+  {
+    "compression_category": "High Compression",
+    "ratio": 12.753457826678877,
+    "threshold": -30.77285767230144,
+    "number_of_trials": 30,
+    "hash_survival": 0.45294117647058835,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 7674.101541926877,
+    "aggregate_statistics": {
+      "survival_max": 0.49019607843137253,
+      "survival_min": 0.43137254901960786
+    }
+  }
+]

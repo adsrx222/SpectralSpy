@@ -1,0 +1,58 @@
+[
+  {
+    "reverb_category": "Low Reverberation",
+    "room_size": 0.18875537004890935,
+    "wet_mix": 0.09356260839153198,
+    "number_of_trials": 30,
+    "hash_survival": 0.5564625850340136,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 5981.024136178447,
+    "aggregate_statistics": {
+      "survival_max": 0.6938775510204082,
+      "survival_min": 0.3469387755102041
+    }
+  },
+  {
+    "reverb_category": "Moderate Reverberation",
+    "room_size": 0.49292361278006463,
+    "wet_mix": 0.29348735401590353,
+    "number_of_trials": 30,
+    "hash_survival": 0.2857142857142858,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 5047.883755338081,
+    "aggregate_statistics": {
+      "survival_max": 0.3673469387755102,
+      "survival_min": 0.12244897959183673
+    }
+  },
+  {
+    "reverb_category": "High Reverberation",
+    "room_size": 0.8230973016506531,
+    "wet_mix": 0.5349004816338927,
+    "number_of_trials": 30,
+    "hash_survival": 0.17823129251700687,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": -0.0897838246409675,
+    "hash_rate": 4499.864613950194,
+    "aggregate_statistics": {
+      "survival_max": 0.3469387755102041,
+      "survival_min": 0.08163265306122448
+    }
+  },
+  {
+    "reverb_category": "Extreme Reverberation",
+    "room_size": 0.9674636389944975,
+    "wet_mix": 0.8522607994988409,
+    "number_of_trials": 30,
+    "hash_survival": 0.5918367346938775,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": -0.09287981859410431,
+    "hash_rate": 5087.724903705954,
+    "aggregate_statistics": {
+      "survival_max": 0.7142857142857143,
+      "survival_min": 0.46938775510204084
+    }
+  }
+]

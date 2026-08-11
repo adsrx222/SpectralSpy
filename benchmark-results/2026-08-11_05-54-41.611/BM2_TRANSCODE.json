@@ -1,0 +1,72 @@
+[
+  {
+    "bitrate": 256,
+    "number_of_trials": 30,
+    "hash_survival": 0.8979591836734687,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 9488.011368090292,
+    "aggregate_statistics": {
+      "hashrate_max": 20167.685134765972,
+      "hashrate_min": 1796.3307902324514,
+      "survival_max": 0.8979591836734694,
+      "survival_min": 0.8979591836734694
+    }
+  },
+  {
+    "bitrate": 160,
+    "number_of_trials": 30,
+    "hash_survival": 0.8979591836734687,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 4572.047455008045,
+    "aggregate_statistics": {
+      "hashrate_max": 16238.157805181494,
+      "hashrate_min": 1942.1955495870004,
+      "survival_max": 0.8979591836734694,
+      "survival_min": 0.8979591836734694
+    }
+  },
+  {
+    "bitrate": 96,
+    "number_of_trials": 30,
+    "hash_survival": 0.7346938775510204,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 4243.660640797906,
+    "aggregate_statistics": {
+      "hashrate_max": 10824.8566544131,
+      "hashrate_min": 950.1966850578743,
+      "survival_max": 0.7346938775510204,
+      "survival_min": 0.7346938775510204
+    }
+  },
+  {
+    "bitrate": 48,
+    "number_of_trials": 30,
+    "hash_survival": 0.5510204081632648,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 5380.606536267614,
+    "aggregate_statistics": {
+      "hashrate_max": 10208.32405303874,
+      "hashrate_min": 1378.138495088424,
+      "survival_max": 0.5510204081632653,
+      "survival_min": 0.5510204081632653
+    }
+  },
+  {
+    "bitrate": 16,
+    "number_of_trials": 30,
+    "hash_survival": 0.5510204081632648,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 7548.052502251516,
+    "aggregate_statistics": {
+      "hashrate_max": 16338.587071207015,
+      "hashrate_min": 2492.616501296775,
+      "survival_max": 0.5510204081632653,
+      "survival_min": 0.5510204081632653
+    }
+  }
+]

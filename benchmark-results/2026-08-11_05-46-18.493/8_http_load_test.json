@@ -1,0 +1,69 @@
+{
+  "duration_seconds": 5,
+  "rates": [
+    50,
+    100,
+    200,
+    500,
+    1000
+  ],
+  "results": [
+    {
+      "error_rate": [],
+      "p50": 0.003315988,
+      "p95": 0.004223292,
+      "p99": 0.007476707,
+      "request_rate": 50,
+      "target_endpoint": "POST /identify",
+      "test_configuration": "Vegeta 50req/s for 5s",
+      "test_duration": 4.9791405829999995,
+      "throughput": 50.19288960836099
+    },
+    {
+      "error_rate": [],
+      "p50": 0.003153167,
+      "p95": 0.003984284,
+      "p99": 0.004494792,
+      "request_rate": 100,
+      "target_endpoint": "POST /identify",
+      "test_configuration": "Vegeta 100req/s for 5s",
+      "test_duration": 4.990197417,
+      "throughput": 100.12764522532437
+    },
+    {
+      "error_rate": [],
+      "p50": 0.003094907,
+      "p95": 0.011508034,
+      "p99": 0.044426094,
+      "request_rate": 200,
+      "target_endpoint": "POST /identify",
+      "test_configuration": "Vegeta 200req/s for 5s",
+      "test_duration": 4.994903334,
+      "throughput": 200.0506211292515
+    },
+    {
+      "error_rate": [],
+      "p50": 0.455685087,
+      "p95": 1.513643558,
+      "p99": 1.9558262050000002,
+      "request_rate": 500,
+      "target_endpoint": "POST /identify",
+      "test_configuration": "Vegeta 500req/s for 5s",
+      "test_duration": 5.071861334,
+      "throughput": 435.428196735402
+    },
+    {
+      "error_rate": [],
+      "p50": 3.38642209,
+      "p95": 6.714341325,
+      "p99": 7.382306315,
+      "request_rate": 1000,
+      "target_endpoint": "POST /identify",
+      "test_configuration": "Vegeta 1000req/s for 5s",
+      "test_duration": 5.032290292,
+      "throughput": 423.4597203823093
+    }
+  ],
+  "target_endpoint": "POST /identify",
+  "test_configuration": "Vegeta HTTP load test"
+}

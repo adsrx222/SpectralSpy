@@ -4,9 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/adsrx222/SpectralSpy/server"
+	SpectralSpy "github.com/adsrx222/SpectralSpy/src"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,7 +16,7 @@ import (
 // notion of song titles or composers, and other consumers of server.Identify
 // may not have (or want) a songs table at all.
 type IdentifyResponse struct {
-	server.IdentifyResponse
+	SpectralSpy.IdentifyResponse
 	Artist    string `json:"artist,omitempty"`
 	SongTitle string `json:"song_title,omitempty"`
 }
@@ -39,19 +38,17 @@ type IdentifyResponse struct {
 //
 // (matching the schema the ingestion pipeline's upsert_song step assumes)
 func (a *App) HandleIdentify(c *gin.Context) {
-	t0 := time.Now()
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2*1024*1024)
 
-	var req server.IdentifyRequest
+	var req SpectralSpy.IdentifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, http.StatusBadRequest, "Invalid JSON payload")
 		return
 	}
-	decodeDuration := time.Since(t0)
 
-	coreResp, err := server.Identify(c.Request.Context(), a.DB, a.Logger, req.Fingerprints)
+	coreResp, err := SpectralSpy.Identify(c.Request.Context(), a.DB, a.Logger, req.Fingerprints)
 	if err != nil {
-		server.RespondIdentifyError(c, err)
+		SpectralSpy.RespondIdentifyError(c, err)
 		return
 	}
 
@@ -73,9 +70,6 @@ func (a *App) HandleIdentify(c *gin.Context) {
 			}
 		}
 	}
-
-	resp.Diagnostics.DecodeTimeMs = decodeDuration.Milliseconds()
-	resp.Diagnostics.TotalTimeMs = time.Since(t0).Milliseconds()
 
 	respondJSON(c, http.StatusOK, resp)
 }

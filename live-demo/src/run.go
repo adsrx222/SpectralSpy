@@ -10,12 +10,11 @@ import (
 	"os"
 	"strings"
 
+	SpectralSpy "github.com/adsrx222/SpectralSpy/src"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
-	"github.com/adsrx222/SpectralSpy/db"
 
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
@@ -75,7 +74,7 @@ func Run(cfg Config) error {
 		}
 	}
 
-	if err := db.InitSchema(dbConn); err != nil {
+	if err := SpectralSpy.InitSchema(dbConn); err != nil {
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
 

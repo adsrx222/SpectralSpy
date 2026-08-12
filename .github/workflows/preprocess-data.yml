@@ -73,7 +73,7 @@ jobs:
           AWS_DEFAULT_REGION: auto
         run: |
           R2_ENDPOINT="https://<your-account-id>.r2.cloudflarestorage.com"
-          BUCKET="s3://<your-bucket-name>"
+          BUCKET="s3://spectralspy"
           
           aws s3 sync ./workspace/waveforms $BUCKET/waveforms \
             --endpoint-url $R2_ENDPOINT

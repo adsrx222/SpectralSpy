@@ -83,22 +83,18 @@ jobs:
           path: workspace
           key: workspace-${{ github.event.inputs.album_url }}
 
+      - name: Install Turso CLI
+        uses: tursodatabase/setup-turso@v1
+
       - name: Replace Database on Turso
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
         run: |
-          curl -sL https://get.turso.tech/install.sh | bash
-          
-          TURSO="$HOME/.turso/turso"
-          if [ ! -f "$TURSO" ]; then
-            TURSO="$HOME/.turso/bin/turso"
-          fi
-          
           echo "Destroying existing database (if it exists)..."
-          "$TURSO" db destroy --yes spectralspy-db || true
-          
+          turso db destroy --yes spectralspy-db || true
+
           echo "Creating new database from local SQLite file..."
-          "$TURSO" db create spectralspy-db --from-file ./workspace/db.sqlite
+          turso db create spectralspy-db --from-file ./workspace/db.sqlite
 
       - name: Upload Waveforms and Constellations to Cloudflare R2 (S3)
         env:

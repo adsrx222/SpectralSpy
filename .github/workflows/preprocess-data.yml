@@ -62,9 +62,6 @@ jobs:
             -d ./workspace/db.sqlite \
             -m ./cmd/data/main.go
 
-      - name: Set up Turso CLI
-        uses: tursodatabase/setup-turso@v1
-
       - name: Replace Database on Turso
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}

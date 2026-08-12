@@ -83,13 +83,18 @@ jobs:
           path: workspace
           key: workspace-${{ github.event.inputs.album_url }}
 
-      - name: Install Turso CLI
-        uses: tursodatabase/setup-turso@v1
-
       - name: Replace Database on Turso
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
         run: |
+          set -euo pipefail
+
+          curl -sSfL https://get.tur.so/install.sh | bash
+
+          export PATH="$HOME/.turso/bin:$PATH"
+
+          turso --version
+
           echo "Destroying existing database (if it exists)..."
           turso db destroy --yes spectralspy-db || true
 

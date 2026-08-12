@@ -37,4 +37,4 @@ jobs:
           context: .
           file: ./live-demo/server/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}/spectralspy-server:latest
+          tags: ghcr.io/adsrx222/spectralspy/spectralspy-server:latest

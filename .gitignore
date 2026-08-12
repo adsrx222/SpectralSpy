@@ -1,4 +1,4 @@
 .env
 workspace
 .venv
-.github
+*.DS_Store

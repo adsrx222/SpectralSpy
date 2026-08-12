@@ -1,0 +1,194 @@
+.
+├── .DS_Store
+├── .env
+├── .gitattributes
+├── .github
+│   └── workflows
+│       ├── deploy-client.yml
+│       ├── deploy-server.yml
+│       └── preprocess-data.yml
+├── .gitignore
+├── benchmark-results
+│   ├── .DS_Store
+│   ├── 2026-08-11_05-46-18.493
+│   │   ├── 7_hash_collision.json
+│   │   ├── 8_http_load_test.json
+│   │   ├── BM1_SNR.json
+│   │   ├── BM2_TRANSCODE.json
+│   │   ├── BM3_COMPRESSION.json
+│   │   ├── BM4_EQ.json
+│   │   ├── BM5_REVERB.json
+│   │   ├── BM6_HASHRATE.json
+│   │   └── run_metadata.json
+│   ├── 2026-08-11_05-54-41.611
+│   │   ├── BM1_SNR.json
+│   │   ├── BM2_TRANSCODE.json
+│   │   ├── BM3_COMPRESSION.json
+│   │   ├── BM4_EQ.json
+│   │   ├── BM5_REVERB.json
+│   │   ├── BM6_HASHRATE.json
+│   │   ├── BM7_HASHCOLLISION.json
+│   │   ├── BM8_LOADTEST.json
+│   │   └── run_metadata.json
+│   └── 2026-08-11_20-13-28.425
+│       ├── BM1_SNR.json
+│       ├── BM2_TRANSCODE.json
+│       ├── BM3_COMPRESSION.json
+│       ├── BM4_EQ.json
+│       ├── BM5_REVERB.json
+│       ├── BM6_HASHRATE.json
+│       ├── BM8_LOADTEST.json
+│       └── run_metadata.json
+├── cmd
+│   ├── benchmark
+│   │   └── main.go
+│   └── data
+│       └── main.go
+├── go.mod
+├── go.sum
+├── live-demo
+│   ├── .DS_Store
+│   ├── client
+│   │   ├── scripts
+│   │   │   └── build_wasm.py
+│   │   ├── static
+│   │   │   └── main.wasm
+│   │   └── wasm
+│   │       └── wasm.go
+│   ├── data-processing
+│   │   ├── requirements.txt
+│   │   └── scripts
+│   │       ├── download_album.py
+│   │       └── process_fingerprints.py
+│   └── server
+│       ├── Dockerfile
+│       ├── cmd
+│       │   └── main.go
+│       ├── db
+│       │   └── schema.sql
+│       └── src
+│           ├── identify.go
+│           ├── livedemo.go
+│           └── run.go
+├── project_structure.txt
+├── src
+│   ├── .DS_Store
+│   ├── benchmark.go
+│   ├── data.go
+│   ├── db.go
+│   ├── fp-engine
+│   │   └── fingerprint.go
+│   ├── schema.sql
+│   ├── server.go
+│   ├── src_test.go
+│   └── testutil.go
+└── workspace
+    ├── .DS_Store
+    ├── constellations
+    │   ├── 04c9d35d5346504358a9aff26a66136825806e28.msgpack
+    │   ├── 099bb83d2582ed202f1af902d1d0bdcf9f01fb62.msgpack
+    │   ├── 106308656853bdcd64c6c62af954730d7693c58a.msgpack
+    │   ├── 1608230c51f2cc1afabbf31ecde8cb6e709887ab.msgpack
+    │   ├── 1f6462ef0872b0ec25a8655d916d582167546b5b.msgpack
+    │   ├── 23acfc98a31014c0eab3e29c1e56a1b9a7a90758.msgpack
+    │   ├── 2c57fcd337f73d46b133811f3a67721dded97bcb.msgpack
+    │   ├── 2dc20413209f8456352e120533ce20e671c0e2d5.msgpack
+    │   ├── 3fbf53ec45c7014338df077044aec83970184775.msgpack
+    │   ├── 4364d3c0ac8991618aaa9eee3ab96989fb054ed3.msgpack
+    │   ├── 43e334426f6ff9990f00c7705bfd84c56d000ba8.msgpack
+    │   ├── 4b84db3bd8a9c6ea8af1083aff368acab8653f59.msgpack
+    │   ├── 54406d895c0b840eca334765f49410e5ba1e5e66.msgpack
+    │   ├── 6c9ddaf9f3ec0106392d2690dc0197a44de9345c.msgpack
+    │   ├── 7524f508f572119d1f6d4cb6647c7c70a8f62312.msgpack
+    │   ├── 77aed308800a4acd7cadd3b80e55357dd92e0768.msgpack
+    │   ├── 793ed7bef25c870d093a754fee68ee69d3220b9c.msgpack
+    │   ├── 7a0a12e725a8030f2a712e3d8319cec5256a3323.msgpack
+    │   ├── 7cbdf709fb41a656c627c7d2690532d4e116dd63.msgpack
+    │   ├── 88207b65e68772092c2df63c4905bb3e4622461a.msgpack
+    │   ├── 8bb90b851dcad18d1e09956ec8ed13c86fe3bc81.msgpack
+    │   ├── 8e4db6af6c4249807a14dda0b3551f742d5fa2ec.msgpack
+    │   ├── 8ea9cd4bdde088ad50a7939e4804d5076972d63d.msgpack
+    │   ├── 90aa1eccad7c346b9a2c1b1a89be327f6d42392a.msgpack
+    │   ├── 91ac8284b4a28a6be94ab59d70ce4a59a3bcf914.msgpack
+    │   ├── 94f4fb1a8b7fcc0615ad4cbb0192d546c9c89d8f.msgpack
+    │   ├── 96cd757eccb2ef7213d6e3a2d9b4b5d6d5b2fa09.msgpack
+    │   ├── 99447b71e1bdcfb288821cac6e17b5665770ffea.msgpack
+    │   ├── 99b6710ac5a9a791ca371409342be8ab386f7504.msgpack
+    │   ├── 9c1c9b771a486d523d83789bc802c52de788eb55.msgpack
+    │   ├── a1db8fee5ab1f7fdd0b77566e7a53d423c182516.msgpack
+    │   ├── aaef3068f9064038882d4474699cccf59ce924ee.msgpack
+    │   ├── b07701e41c0eac7a21bd49ad11347bc4cce7bb25.msgpack
+    │   ├── b18798ec64ceb808beb85331eec1a3ae0f64dec8.msgpack
+    │   ├── b2a286cbab30736779b101f95a55d374704025d6.msgpack
+    │   ├── b2c1924d7bdf62a62cbaeec6091c05e8af3092bd.msgpack
+    │   ├── b394ac0f35683f6cfc8d02b37a27265d1a362506.msgpack
+    │   ├── c309843623e917a8adedbb29dd0baec9a4bd34aa.msgpack
+    │   ├── c6e145769dd61b849e2ee5e97fc681130d2492c3.msgpack
+    │   ├── caa0f8910c8a65715a1506970e78a2a968879f13.msgpack
+    │   ├── ce794fba889679430e74fc0724f8a7ebeba544ae.msgpack
+    │   ├── d016a72ff4e965e37f61f63913d326233122bddd.msgpack
+    │   ├── d8d0dcf7bc96d462de7abc64d9ca21e70a03f5d2.msgpack
+    │   ├── e7f9f2a944ef8da1c41051f1bcdeec90464cd5d4.msgpack
+    │   ├── eba413057e38ebb5c7d77bad1fd5745e5458b636.msgpack
+    │   ├── ee104b126bf84f41e67b40a15fb7b8abf0eaf2f7.msgpack
+    │   ├── f23c21ef870fab9ee3b3258ea37bbdf22e2caeda.msgpack
+    │   ├── f556eb452b274dd46f3f3ea8d6de04dc7baa3d3e.msgpack
+    │   ├── fc3f60a191fb9a6a99e20e7948b92f70407a16e2.msgpack
+    │   └── fe024dd46e8ce0f7b6b1251530bdf4608c30945d.msgpack
+    ├── db.sqlite
+    ├── db.sqlite-shm
+    ├── db.sqlite-wal
+    ├── model.json
+    └── waveforms
+        ├── Aerodynamic (Daft Punk Remix).wav
+        ├── Aerodynamic.wav
+        ├── Alive.wav
+        ├── Around the World ⧸ Harder, Better, Faster, Stronger.wav
+        ├── Around the World.wav
+        ├── Beyond.wav
+        ├── Contact.wav
+        ├── Crescendolls.wav
+        ├── Da Funk.wav
+        ├── Daftendirekt.wav
+        ├── Derezzed (From ＂TRON： Legacy＂⧸Score).wav
+        ├── Digital Love.wav
+        ├── Doin' it Right (feat. Panda Bear).wav
+        ├── End Of Line (feat. TRS-80).wav
+        ├── Face to Face ⧸ Short Circuit.wav
+        ├── Face to Face.wav
+        ├── Fragments of Time (feat. Todd Edwards).wav
+        ├── GLBTM (Studio Outtakes) [Edit].wav
+        ├── Get Lucky (feat. Pharrell Williams and Nile Rodgers).wav
+        ├── Give Life Back to Music.wav
+        ├── Harder, Better, Faster, Stronger.wav
+        ├── High Life.wav
+        ├── Human After All ⧸ Together ⧸ One More Time ⧸ Music Sounds Better with You.wav
+        ├── Human After All.wav
+        ├── I Feel It Coming.wav
+        ├── Motherboard.wav
+        ├── Musique.wav
+        ├── Oh Yeah.wav
+        ├── On Sight.wav
+        ├── On ⧸ Off.wav
+        ├── One More Time ⧸ Aerodynamic.wav
+        ├── One More Time.wav
+        ├── Prime (2012 Unfinished).wav
+        ├── Prime Time of Your Life ⧸ Brainwasher ⧸ Rollin' & Scratchin' ⧸ Alive.wav
+        ├── Revolution 909.wav
+        ├── Robot Rock.wav
+        ├── Rollin' & Scratchin'.wav
+        ├── Short Circuit.wav
+        ├── Steam Machine.wav
+        ├── Superheroes.wav
+        ├── Technologic.wav
+        ├── Television Rules the Nation ⧸ Crescendolls.wav
+        ├── The Brainwasher.wav
+        ├── The Prime Time of Your Life.wav
+        ├── The Son of Flynn (From ＂TRON： Legacy＂⧸Score).wav
+        ├── Too Long ⧸ Steam Machine.wav
+        ├── Touch (feat. Paul Williams).wav
+        ├── Veridis Quo.wav
+        ├── Voyager.wav
+        └── WDPK 83.7 FM.wav
+
+26 directories, 166 files

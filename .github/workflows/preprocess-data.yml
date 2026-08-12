@@ -1,0 +1,82 @@
+name: Pre-process Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      album_url:
+        description: 'YouTube Playlist/Album URL'
+        required: true
+        type: string
+        default: 'https://www.youtube.com/playlist?list=PL5A-FXHBxgj3Gfluaje-MuhXC5iBsZF5w'
+
+jobs:
+  process-and-upload-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install System Dependencies (FFmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r live-demo/data-processing/requirements.txt
+
+      - name: Run download_album.py
+        run: |
+          python live-demo/data-processing/scripts/download_album.py \
+            ./workspace \
+            "${{ github.event.inputs.album_url }}" \
+            ./live-demo/server/db/schema.sql \
+            ./workspace/db.sqlite
+
+      - name: Run process_fingerprints.py
+        run: |
+          python live-demo/data-processing/scripts/process_fingerprints.py \
+            -w ./workspace \
+            -s ./live-demo/server/db/schema.sql ./src/schema.sql \
+            -d ./workspace/db.sqlite \
+            -m ./cmd/data/main.go
+
+      - name: Replace Database on Turso
+        env:
+          TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
+        run: |
+          # Install Turso CLI
+          curl -sL https://get.turso.tech/install.sh | bash
+          export PATH="$HOME/.turso:$PATH"
+          
+          echo "Destroying existing database (if it exists)..."
+          turso db destroy --yes spectralspy-db || true
+          
+          echo "Creating new database from local SQLite file..."
+          turso db create spectralspy-db --from-file ./workspace/db.sqlite
+
+      - name: Upload Waveforms and Constellations to Cloudflare R2 (S3)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          R2_ENDPOINT="https://<your-account-id>.r2.cloudflarestorage.com"
+          BUCKET="s3://<your-bucket-name>"
+          
+          aws s3 sync ./workspace/waveforms $BUCKET/waveforms \
+            --endpoint-url $R2_ENDPOINT
+            
+          aws s3 sync ./workspace/constellations $BUCKET/constellations \
+            --endpoint-url $R2_ENDPOINT

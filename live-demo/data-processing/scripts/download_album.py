@@ -68,6 +68,7 @@ def fetch_playlist_entries(album_url: str) -> List[Dict]:
         "quiet": False,
         "skip_download": True,
         "ignoreerrors": True,  # skip private/deleted videos instead of aborting
+        "cookiefile": "cookies.txt",  # Pass cookies to avoid bot detection on playlist load
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -144,7 +145,7 @@ def download_track_as_wav(video_url: str, destination_dir: str) -> Optional[str]
         "quiet": True,
         "no_warnings": True,
         "progress_hooks": [_progress_hook],
-        "no_cookies": True,
+        "cookiefile": "cookies.txt", # Replaced "no_cookies": True with the exported cookie file
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:

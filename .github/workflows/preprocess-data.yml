@@ -37,7 +37,12 @@ jobs:
           pip install -r live-demo/data-processing/requirements.txt
 
       - name: Run download_album.py
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
+          # write the secret to a file named cookies.txt
+          echo "$YOUTUBE_COOKIES" > cookies.txt
+          
           python live-demo/data-processing/scripts/download_album.py \
             ./workspace \
             "${{ github.event.inputs.album_url }}" \

@@ -58,7 +58,7 @@ jobs:
         run: |
           python live-demo/data-processing/scripts/process_fingerprints.py \
             -w ./workspace \
-            -s ./live-demo/server/db/schema.sql ./src/schema.sql \
+            -s ./src/schema.sql \
             -d ./workspace/db.sqlite \
             -m ./cmd/data/main.go
 

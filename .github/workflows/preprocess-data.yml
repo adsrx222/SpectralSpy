@@ -9,7 +9,7 @@ on:
         type: string
         default: 'https://www.youtube.com/playlist?list=PL5A-FXHBxgj3Gfluaje-MuhXC5iBsZF5w'
       skip_processing:
-        description: 'Skip download & fingerprinting (Fetch workspace/DB from R2)'
+        description: 'Skip download & fingerprinting (Use GitHub Cache)'
         required: false
         type: boolean
         default: false
@@ -20,6 +20,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # restore or save the workspace directory
+      - name: Cache Workspace
+        uses: actions/cache@v4
+        with:
+          path: workspace
+          key: workspace-${{ github.event.inputs.album_url }}
+          restore-keys: |
+            workspace-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,26 +55,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r live-demo/data-processing/requirements.txt
 
-      # 1. Pull cached DB and files down from R2 if skipping processing
-      - name: Restore Workspace from Cloudflare R2
-        if: ${{ inputs.skip_processing }}
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BUCKET="s3://spectralspy"
-          
-          mkdir -p ./workspace/waveforms ./workspace/constellations
-          
-          echo "Restoring cached database and workspace files from Cloudflare R2..."
-          aws s3 cp $BUCKET/db.sqlite ./workspace/db.sqlite --endpoint-url $R2_ENDPOINT || true
-          aws s3 sync $BUCKET/waveforms ./workspace/waveforms --endpoint-url $R2_ENDPOINT || true
-          aws s3 sync $BUCKET/constellations ./workspace/constellations --endpoint-url $R2_ENDPOINT || true
-
-      # 2. Skip YouTube downloading if skip_processing is checked
+      # Skip downloading if skip_processing is checked
       - name: Run download_album.py
         if: ${{ !inputs.skip_processing }}
         env:
@@ -79,7 +69,7 @@ jobs:
             ./live-demo/server/db/schema.sql \
             ./workspace/db.sqlite
 
-      # 3. Skip fingerprinting if skip_processing is checked
+      # Skip fingerprinting if skip_processing is checked
       - name: Run process_fingerprints.py
         if: ${{ !inputs.skip_processing }}
         run: |
@@ -106,8 +96,7 @@ jobs:
           echo "Creating new database from local SQLite file..."
           "$TURSO" db create spectralspy-db --from-file ./workspace/db.sqlite
 
-      # 4. Upload waveforms, constellations, AND db.sqlite to R2
-      - name: Upload Waveforms, Constellations, and DB to Cloudflare R2 (S3)
+      - name: Upload Waveforms and Constellations to Cloudflare R2 (S3)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -117,12 +106,8 @@ jobs:
           R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           BUCKET="s3://spectralspy"
           
-          echo "Syncing workspace files to Cloudflare R2..."
           aws s3 sync ./workspace/waveforms $BUCKET/waveforms \
             --endpoint-url $R2_ENDPOINT
             
           aws s3 sync ./workspace/constellations $BUCKET/constellations \
-            --endpoint-url $R2_ENDPOINT
-
-          aws s3 cp ./workspace/db.sqlite $BUCKET/db.sqlite \
             --endpoint-url $R2_ENDPOINT

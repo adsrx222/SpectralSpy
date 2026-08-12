@@ -69,15 +69,17 @@ jobs:
           # install Turso CLI
           curl -sL https://get.turso.tech/install.sh | bash
           
-          # add turso to path
-          echo "$HOME/.turso" >> $GITHUB_PATH
-          export PATH="$HOME/.turso:$PATH"
+          # locate binary explicitly to prevent path resolution failures in current shell context
+          TURSO="$HOME/.turso/turso"
+          if [ ! -f "$TURSO" ]; then
+            TURSO="$HOME/.turso/bin/turso"
+          fi
           
           echo "Destroying existing database (if it exists)..."
-          turso db destroy --yes spectralspy-db || true
+          "$TURSO" db destroy --yes spectralspy-db || true
           
           echo "Creating new database from local SQLite file..."
-          turso db create spectralspy-db --from-file ./workspace/db.sqlite
+          "$TURSO" db create spectralspy-db --from-file ./workspace/db.sqlite
 
       - name: Upload Waveforms and Constellations to Cloudflare R2 (S3)
         env:
@@ -86,7 +88,6 @@ jobs:
           AWS_DEFAULT_REGION: auto
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }} 
         run: |
-          # UPDATED: Use the secret in the endpoint URL
           R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           BUCKET="s3://spectralspy"
           

@@ -83,7 +83,7 @@ jobs:
           path: workspace
           key: workspace-${{ github.event.inputs.album_url }}
 
-      - name: Replace Database on Turso (HTTP API)
+      - name: Replace Database on Turso
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
           DATABASE_NAME: spectralspy
@@ -91,7 +91,7 @@ jobs:
           sqlite3 ./workspace/db.sqlite "PRAGMA journal_mode=WAL; PRAGMA wal_checkpoint(TRUNCATE);"
           echo "$HOME/.turso" >> $GITHUB_PATH
           export PATH="$HOME/.turso:$PATH"
-          turso auth token --api-token "$TURSO_TOKEN"
+          turso auth token --api-token "$TURSO_API_TOKEN"
           turso db shell $DATABASE_NAME < ./workspace/db.sqlite
          
 

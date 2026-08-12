@@ -86,6 +86,7 @@ jobs:
       - name: Replace Database on Turso (HTTP API)
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
+          TURSO_ORG: "adsrx222"
         run: |
           # 1. Ensure dependencies are installed
           sudo apt-get update -qq
@@ -95,44 +96,34 @@ jobs:
           echo "Converting SQLite database to WAL mode..."
           sqlite3 ./workspace/db.sqlite "PRAGMA journal_mode=WAL; PRAGMA wal_checkpoint(TRUNCATE);"
 
-          # 3. Fetch Organization Slug safely
-          echo "Fetching Turso Organization Slug..."
-          ORG_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer ${TURSO_API_TOKEN}" https://api.turso.tech/v1/organizations)
-          HTTP_BODY=$(echo "$ORG_RESPONSE" | head -n -1)
-          HTTP_STATUS=$(echo "$ORG_RESPONSE" | tail -n 1)
-
-          if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "Error: Turso API authentication failed with HTTP status $HTTP_STATUS."
-            echo "API Response: $HTTP_BODY"
-            echo "Please check that TURSO_API_TOKEN is set correctly in GitHub Repository Secrets."
-            exit 1
-          fi
-
-          TURSO_ORG=$(echo "$HTTP_BODY" | jq -r 'if type=="array" then .[0].slug else .slug // .organization.slug end')
-          echo "Authenticated as Organization: ${TURSO_ORG}"
-
-          # 4. Destroy existing database (ignore if it doesn't exist)
+          # 3. Destroy existing database via Platform API (ignore if it doesn't exist)
           echo "Destroying existing database..."
           curl -s -X DELETE "https://api.turso.tech/v1/organizations/${TURSO_ORG}/databases/spectralspy-db" \
             -H "Authorization: Bearer ${TURSO_API_TOKEN}" || true
 
-          # 5. Create new database seeded for binary upload
+          # 4. Create new database seeded for binary upload in group 'default'
           echo "Creating new database seeded for binary upload..."
-          curl -s -X POST "https://api.turso.tech/v1/organizations/${TURSO_ORG}/databases" \
+          CREATE_RESP=$(curl -s -X POST "https://api.turso.tech/v1/organizations/${TURSO_ORG}/databases" \
             -H "Authorization: Bearer ${TURSO_API_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{
               "name": "spectralspy-db",
               "group": "default",
               "seed": { "type": "database_upload" }
-            }' > /dev/null
+            }')
 
-          # 6. Generate temporary upload token
+          # 5. Generate temporary upload token
           echo "Minting upload token..."
           DB_TOKEN=$(curl -s -X POST "https://api.turso.tech/v1/organizations/${TURSO_ORG}/databases/spectralspy-db/auth/tokens" \
             -H "Authorization: Bearer ${TURSO_API_TOKEN}" | jq -r '.jwt')
 
-          # 7. Upload binary SQLite file directly
+          if [ -z "${DB_TOKEN}" ] || [ "${DB_TOKEN}" = "null" ]; then
+            echo "Error: Failed to mint database upload token."
+            echo "API Response: ${CREATE_RESP}"
+            exit 1
+          fi
+
+          # 6. Upload binary SQLite file directly
           echo "Uploading binary SQLite file to Turso..."
           curl -s -X POST "https://spectralspy-db-${TURSO_ORG}.turso.io/v1/upload" \
             -H "Authorization: Bearer ${DB_TOKEN}" \

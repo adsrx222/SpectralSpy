@@ -21,9 +21,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # restore or save the workspace directory
-      - name: Cache Workspace
-        uses: actions/cache@v4
+      - name: Restore Workspace Cache
+        uses: actions/cache/restore@v4
         with:
           path: workspace
           key: workspace-${{ github.event.inputs.album_url }}
@@ -55,7 +54,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r live-demo/data-processing/requirements.txt
 
-      # Skip downloading if skip_processing is checked
       - name: Run download_album.py
         if: ${{ !inputs.skip_processing }}
         env:
@@ -69,7 +67,6 @@ jobs:
             ./live-demo/server/db/schema.sql \
             ./workspace/db.sqlite
 
-      # Skip fingerprinting if skip_processing is checked
       - name: Run process_fingerprints.py
         if: ${{ !inputs.skip_processing }}
         run: |
@@ -78,6 +75,13 @@ jobs:
             -s ./src/schema.sql \
             -d ./workspace/db.sqlite \
             -m ./cmd/data/main.go
+
+      - name: Save Workspace to Cache
+        if: ${{ !inputs.skip_processing }}
+        uses: actions/cache/save@v4
+        with:
+          path: workspace
+          key: workspace-${{ github.event.inputs.album_url }}
 
       - name: Replace Database on Turso
         env:

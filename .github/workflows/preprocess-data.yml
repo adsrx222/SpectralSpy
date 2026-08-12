@@ -69,6 +69,13 @@ jobs:
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
         run: |
+          # install Turso CLI
+          curl -sL https://get.turso.tech/install.sh | bash
+          
+          # add turso to path
+          echo "$HOME/.turso" >> $GITHUB_PATH
+          export PATH="$HOME/.turso:$PATH"
+          
           echo "Destroying existing database (if it exists)..."
           turso db destroy --yes spectralspy-db || true
           

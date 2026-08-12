@@ -83,16 +83,147 @@ jobs:
           path: workspace
           key: workspace-${{ github.event.inputs.album_url }}
 
-      - name: Replace Database on Turso (HTTP API)
+            - name: Replace Database on Turso
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
-          DATABASE_NAME: spectralspy
+          TURSO_ORG: adsrx222
+          DATABASE_NAME: spectralspy-db
+        shell: bash
         run: |
-          sqlite3 ./workspace/db.sqlite "PRAGMA journal_mode=WAL; PRAGMA wal_checkpoint(TRUNCATE);"
-          echo "$HOME/.turso" >> $GITHUB_PATH
-          export PATH="$HOME/.turso:$PATH"
-          turso auth token --api-token "$TURSO_TOKEN"
-          turso db shell $DATABASE_NAME < ./workspace/db.sqlite
+          set -euo pipefail
+
+          DB_FILE="./workspace/db.sqlite"
+
+          echo "==> Checking SQLite database"
+
+          test -f "$DB_FILE" || {
+            echo "ERROR: $DB_FILE does not exist"
+            exit 1
+          }
+
+          echo "==> Preparing SQLite database for Turso"
+
+          sqlite3 "$DB_FILE" <<'SQL'
+          PRAGMA journal_mode=WAL;
+          PRAGMA wal_checkpoint(TRUNCATE);
+          PRAGMA page_size=4096;
+          PRAGMA auto_vacuum=0;
+          PRAGMA encoding='UTF-8';
+          SQL
+
+          echo "==> SQLite database information"
+          sqlite3 "$DB_FILE" <<'SQL'
+          PRAGMA journal_mode;
+          PRAGMA page_size;
+          PRAGMA auto_vacuum;
+          PRAGMA encoding;
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table'
+          ORDER BY name;
+          SQL
+
+          echo "==> Checking Turso API authentication"
+
+          test -n "$TURSO_API_TOKEN" || {
+            echo "ERROR: TURSO_API_TOKEN GitHub secret is empty or missing"
+            exit 1
+          }
+
+          echo "==> Deleting existing Turso database if it exists"
+
+          DELETE_RESPONSE=$(curl --silent --show-error \
+            --write-out "\n%{http_code}" \
+            --request DELETE \
+            "https://api.turso.tech/v1/organizations/${TURSO_ORG}/databases/${DATABASE_NAME}" \
+            --header "Authorization: Bearer ${TURSO_API_TOKEN}")
+
+          DELETE_STATUS=$(echo "$DELETE_RESPONSE" | tail -n1)
+          DELETE_BODY=$(echo "$DELETE_RESPONSE" | sed '$d')
+
+          echo "Delete HTTP status: $DELETE_STATUS"
+
+          if [ "$DELETE_STATUS" != "200" ] && [ "$DELETE_STATUS" != "404" ]; then
+            echo "ERROR: Failed to delete existing database"
+            echo "$DELETE_BODY"
+            exit 1
+          fi
+
+          echo "==> Creating database configured for SQLite upload"
+
+          CREATE_RESPONSE=$(curl --silent --show-error \
+            --write-out "\n%{http_code}" \
+            --request POST \
+            "https://api.turso.tech/v1/organizations/${TURSO_ORG}/databases" \
+            --header "Authorization: Bearer ${TURSO_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"name\": \"${DATABASE_NAME}\",
+              \"group\": \"default\",
+              \"seed\": {
+                \"type\": \"database_upload\"
+              }
+            }")
+
+          CREATE_STATUS=$(echo "$CREATE_RESPONSE" | tail -n1)
+          CREATE_BODY=$(echo "$CREATE_RESPONSE" | sed '$d')
+
+          echo "Create HTTP status: $CREATE_STATUS"
+          echo "$CREATE_BODY"
+
+          if [ "$CREATE_STATUS" != "200" ] && [ "$CREATE_STATUS" != "201\" ]; then
+            echo "ERROR: Failed to create Turso database"
+            exit 1
+          fi
+
+          echo "==> Creating database authentication token"
+
+          TOKEN_RESPONSE=$(curl --silent --show-error \
+            --write-out "\n%{http_code}" \
+            --request POST \
+            "https://api.turso.tech/v1/organizations/${TURSO_ORG}/databases/${DATABASE_NAME}/auth/tokens" \
+            --header "Authorization: Bearer ${TURSO_API_TOKEN}")
+
+          TOKEN_STATUS=$(echo "$TOKEN_RESPONSE" | tail -n1)
+          TOKEN_BODY=$(echo "$TOKEN_RESPONSE" | sed '$d')
+
+          echo "Token HTTP status: $TOKEN_STATUS"
+
+          if [ "$TOKEN_STATUS" != "200" ] && [ "$TOKEN_STATUS" != "201" ]; then
+            echo "ERROR: Failed to create database token"
+            echo "$TOKEN_BODY"
+            exit 1
+          fi
+
+          DATABASE_TOKEN=$(echo "$TOKEN_BODY" | jq -r '.jwt_token // .token // empty')
+
+          test -n "$DATABASE_TOKEN" || {
+            echo "ERROR: Turso did not return a database token"
+            echo "$TOKEN_BODY"
+            exit 1
+          }
+
+          echo "==> Uploading SQLite database to Turso"
+
+          FILE_SIZE=$(stat -c%s "$DB_FILE")
+
+          UPLOAD_STATUS=$(curl --silent --show-error \
+            --write-out "%{http_code}" \
+            --request POST \
+            "https://${DATABASE_NAME}-${TURSO_ORG}.turso.io/v1/upload" \
+            --header "Authorization: Bearer ${DATABASE_TOKEN}" \
+            --header "Content-Length: ${FILE_SIZE}" \
+            --data-binary "@${DB_FILE}")
+
+          echo ""
+          echo "Upload HTTP status: $UPLOAD_STATUS"
+
+          if [ "$UPLOAD_STATUS" != "200" ]; then
+            echo "ERROR: Turso database upload failed"
+            exit 1
+          fi
+
+          echo "==> Turso database upload completed successfully"
          
 
       - name: Upload Waveforms and Constellations to Cloudflare R2 (S3)

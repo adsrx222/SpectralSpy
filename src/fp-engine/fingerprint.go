@@ -1,4 +1,4 @@
-package SpectralSpy
+package SpectralSpyEngine
 
 import (
 	"context"
@@ -96,7 +96,7 @@ type StageMetrics struct {
 	TotalDuration       time.Duration `json:"total_duration"`
 }
 
-func buildSpectrogram(ctx context.Context, samples []float64) Spectrogram {
+func BuildSpectrogram(ctx context.Context, samples []float64) Spectrogram {
 	numSamples := len(samples)
 	if numSamples == 0 {
 		return Spectrogram{BinHz: float64(SAMPLE_RATE) / float64(WINDOW_SIZE)}
@@ -166,7 +166,7 @@ func buildSpectrogram(ctx context.Context, samples []float64) Spectrogram {
 	}
 }
 
-func findPeaks(ctx context.Context, sg Spectrogram) [][]ConstellationPoint {
+func FindPeaks(ctx context.Context, sg Spectrogram) [][]ConstellationPoint {
 	numFrames := len(sg.Mags)
 	if numFrames == 0 {
 		return nil
@@ -257,7 +257,7 @@ func findPeaks(ctx context.Context, sg Spectrogram) [][]ConstellationPoint {
 	return peaks
 }
 
-func hashPair(anchor, tether ConstellationPoint) uint64 {
+func HashPair(anchor, tether ConstellationPoint) uint64 {
 	var buf [24]byte
 
 	binary.LittleEndian.PutUint64(buf[0:8], math.Float64bits(anchor.Frequency))
@@ -267,7 +267,7 @@ func hashPair(anchor, tether ConstellationPoint) uint64 {
 	return xxh3.Hash(buf[:])
 }
 
-func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Fingerprint {
+func GenerateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Fingerprint {
 	numFrames := len(peaks)
 	if numFrames == 0 {
 		return nil
@@ -318,7 +318,7 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Fi
 							}
 
 							local = append(local, Fingerprint{
-								Hash:       hashPair(anchor, tether),
+								Hash:       HashPair(anchor, tether),
 								AnchorTime: anchor.Timestamp,
 							})
 
@@ -353,14 +353,14 @@ func generateHashEntries(ctx context.Context, peaks [][]ConstellationPoint) []Fi
 }
 
 func Process(ctx context.Context, samples []float64) []Fingerprint {
-	sg := buildSpectrogram(ctx, samples)
-	peaks := findPeaks(ctx, sg)
-	return generateHashEntries(ctx, peaks)
+	sg := BuildSpectrogram(ctx, samples)
+	peaks := FindPeaks(ctx, sg)
+	return GenerateHashEntries(ctx, peaks)
 }
 
 func ProcessWithPeaks(ctx context.Context, samples []float64) ([]Fingerprint, [][]ConstellationPoint) {
-	sg := buildSpectrogram(ctx, samples)
-	rawPeaks := findPeaks(ctx, sg)
+	sg := BuildSpectrogram(ctx, samples)
+	rawPeaks := FindPeaks(ctx, sg)
 
 	var cleanPeaks [][]ConstellationPoint
 	for _, framePeaks := range rawPeaks {
@@ -369,7 +369,7 @@ func ProcessWithPeaks(ctx context.Context, samples []float64) ([]Fingerprint, []
 		}
 	}
 
-	return generateHashEntries(ctx, rawPeaks), cleanPeaks
+	return GenerateHashEntries(ctx, rawPeaks), cleanPeaks
 }
 
 func ProcessWithMetrics(ctx context.Context, samples []float64) ([]Fingerprint, StageMetrics) {
@@ -377,15 +377,15 @@ func ProcessWithMetrics(ctx context.Context, samples []float64) ([]Fingerprint, 
 	totalStart := time.Now()
 
 	t0 := time.Now()
-	sg := buildSpectrogram(ctx, samples)
+	sg := BuildSpectrogram(ctx, samples)
 	metrics.SpectrogramDuration = time.Since(t0)
 
 	t1 := time.Now()
-	peaks := findPeaks(ctx, sg)
+	peaks := FindPeaks(ctx, sg)
 	metrics.PeakFindDuration = time.Since(t1)
 
 	t2 := time.Now()
-	entries := generateHashEntries(ctx, peaks)
+	entries := GenerateHashEntries(ctx, peaks)
 	metrics.HashGenDuration = time.Since(t2)
 
 	metrics.TotalDuration = time.Since(totalStart)

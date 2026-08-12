@@ -10,12 +10,11 @@ import (
 	"os"
 	"strings"
 
-	SpectralSpy "github.com/adsrx222/SpectralSpy/src"
+	"github.com/adsrx222/SpectralSpy/src"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )

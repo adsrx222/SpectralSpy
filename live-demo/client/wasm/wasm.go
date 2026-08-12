@@ -1,3 +1,5 @@
+//go:build js && wasm
+
 package main
 
 import (
@@ -5,7 +7,7 @@ import (
 	"strconv"
 	"syscall/js"
 
-	"github.com/adsrx222/SpectralSpy/SpectralSpy"
+	SpectralSpyEngine "github.com/adsrx222/SpectralSpy/src/fp-engine"
 )
 
 func processSamples(this js.Value, args []js.Value) any {
@@ -23,7 +25,7 @@ func processSamples(this js.Value, args []js.Value) any {
 		samples[i] = jsSamples.Index(i).Float()
 	}
 
-	fingerprints := SpectralSpy.Process(context.Background(), samples)
+	fingerprints := SpectralSpyEngine.Process(context.Background(), samples)
 
 	// initialize a JavaScript Array to hold the returned fingerprints
 	jsResult := js.Global().Get("Array").New(len(fingerprints))
@@ -42,7 +44,7 @@ func processSamples(this js.Value, args []js.Value) any {
 }
 
 func main() {
-	c := make(chan struct{}, 0)
+	c := make(chan struct{})
 	js.Global().Set("processAudioSamples", js.FuncOf(processSamples))
 	<-c
 }

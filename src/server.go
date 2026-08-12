@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	SpectralSpyEngine "github.com/adsrx222/SpectralSpy/src/fp-engine"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,7 +23,7 @@ var (
 )
 
 type IdentifyRequest struct {
-	Fingerprints []Fingerprint `json:"fingerprints"`
+	Fingerprints []SpectralSpyEngine.Fingerprint `json:"fingerprints"`
 }
 
 type Diagnostics struct {
@@ -49,7 +50,7 @@ type APIError struct {
 	Details string `json:"details,omitempty"`
 }
 
-func Identify(ctx context.Context, db *sql.DB, logger *slog.Logger, fingerprints []Fingerprint) (IdentifyResponse, error) {
+func Identify(ctx context.Context, db *sql.DB, logger *slog.Logger, fingerprints []SpectralSpyEngine.Fingerprint) (IdentifyResponse, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -93,7 +94,7 @@ func Identify(ctx context.Context, db *sql.DB, logger *slog.Logger, fingerprints
 	dbQueryDuration := time.Since(t2)
 
 	t3 := time.Now()
-	dbMap := make(map[uint64][]DBEntry)
+	dbMap := make(map[uint64][]SpectralSpyEngine.DBEntry)
 
 	for rows.Next() {
 		var hash int64
@@ -107,7 +108,7 @@ func Identify(ctx context.Context, db *sql.DB, logger *slog.Logger, fingerprints
 		}
 
 		uintHash := uint64(hash)
-		dbMap[uintHash] = append(dbMap[uintHash], DBEntry{
+		dbMap[uintHash] = append(dbMap[uintHash], SpectralSpyEngine.DBEntry{
 			Hash:       uintHash,
 			SongID:     songID,
 			AnchorTime: anchorTime,
@@ -126,7 +127,7 @@ func Identify(ctx context.Context, db *sql.DB, logger *slog.Logger, fingerprints
 	}
 
 	t4 := time.Now()
-	bestSongID, bestScore, matchOffset, confidence := MatchFingerprints(fingerprints, dbMap)
+	bestSongID, bestScore, matchOffset, confidence := SpectralSpyEngine.MatchFingerprints(fingerprints, dbMap)
 	if bestSongID == "" {
 		return IdentifyResponse{}, ErrNoMatch
 	}

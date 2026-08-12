@@ -1,0 +1,72 @@
+[
+  {
+    "bitrate": 256,
+    "number_of_trials": 30,
+    "hash_survival": 0.914893617021277,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 10148.39276429447,
+    "aggregate_statistics": {
+      "hashrate_max": 33737.356925492175,
+      "hashrate_min": 1201.7518657998885,
+      "survival_max": 0.9148936170212766,
+      "survival_min": 0.9148936170212766
+    }
+  },
+  {
+    "bitrate": 160,
+    "number_of_trials": 30,
+    "hash_survival": 0.8297872340425531,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 3514.78218987929,
+    "aggregate_statistics": {
+      "hashrate_max": 7202.5456677408065,
+      "hashrate_min": 1770.3408425421874,
+      "survival_max": 0.8297872340425532,
+      "survival_min": 0.8297872340425532
+    }
+  },
+  {
+    "bitrate": 96,
+    "number_of_trials": 30,
+    "hash_survival": 0.6170212765957445,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 2808.4905692804036,
+    "aggregate_statistics": {
+      "hashrate_max": 5304.564434329133,
+      "hashrate_min": 950.6171355058993,
+      "survival_max": 0.6170212765957447,
+      "survival_min": 0.6170212765957447
+    }
+  },
+  {
+    "bitrate": 48,
+    "number_of_trials": 30,
+    "hash_survival": 0.46808510638297907,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 2897.5279947154318,
+    "aggregate_statistics": {
+      "hashrate_max": 6880.890517607747,
+      "hashrate_min": 796.7716657260219,
+      "survival_max": 0.46808510638297873,
+      "survival_min": 0.46808510638297873
+    }
+  },
+  {
+    "bitrate": 16,
+    "number_of_trials": 30,
+    "hash_survival": 0.46808510638297907,
+    "accuracy_correct_rate": 1,
+    "accuracy_offset_margin": 0,
+    "hash_rate": 2959.744976886957,
+    "aggregate_statistics": {
+      "hashrate_max": 7004.027315706531,
+      "hashrate_min": 899.6792216227285,
+      "survival_max": 0.46808510638297873,
+      "survival_min": 0.46808510638297873
+    }
+  }
+]

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	SpectralSpyEngine "github.com/adsrx222/SpectralSpy/src/fp-engine"
 	"github.com/gin-gonic/gin"
 	"github.com/tsenart/vegeta/v12/lib"
 )
@@ -33,11 +34,11 @@ func RunBenchmarks(runDir, dbPath, waveformPath string) {
 		os.Exit(1)
 	}
 
-	cleanFps := Process(context.Background(), cleanSamples)
+	cleanFps := SpectralSpyEngine.Process(context.Background(), cleanSamples)
 
-	dbMap := make(map[uint64][]DBEntry)
+	dbMap := make(map[uint64][]SpectralSpyEngine.DBEntry)
 	for _, fp := range cleanFps {
-		dbMap[fp.Hash] = append(dbMap[fp.Hash], DBEntry{
+		dbMap[fp.Hash] = append(dbMap[fp.Hash], SpectralSpyEngine.DBEntry{
 			Hash:       fp.Hash,
 			SongID:     "test-song",
 			AnchorTime: fp.AnchorTime,
@@ -66,7 +67,7 @@ func RunBenchmarks(runDir, dbPath, waveformPath string) {
 	fmt.Println("Benchmarks Complete!")
 }
 
-func BM1_SNR(runDir string, cleanSamples []float64, cleanFps []Fingerprint, dbMap map[uint64][]DBEntry) {
+func BM1_SNR(runDir string, cleanSamples []float64, cleanFps []SpectralSpyEngine.Fingerprint, dbMap map[uint64][]SpectralSpyEngine.DBEntry) {
 	fmt.Println("Running Benchmark #1: Noise")
 
 	type NoiseResult struct {
@@ -99,7 +100,7 @@ func BM1_SNR(runDir string, cleanSamples []float64, cleanFps []Fingerprint, dbMa
 			noisySamples := addNoise(cleanSamples, noiseLevel, rng)
 
 			t0 := time.Now()
-			noisyFps := Process(context.Background(), noisySamples)
+			noisyFps := SpectralSpyEngine.Process(context.Background(), noisySamples)
 			dur := time.Since(t0)
 
 			hr := 0.0
@@ -116,7 +117,7 @@ func BM1_SNR(runDir string, cleanSamples []float64, cleanFps []Fingerprint, dbMa
 			}
 			survivalStats = append(survivalStats, float64(survived)/float64(len(cleanFps)))
 
-			bestSongID, _, timeOffset, _ := MatchFingerprints(noisyFps, dbMap)
+			bestSongID, _, timeOffset, _ := SpectralSpyEngine.MatchFingerprints(noisyFps, dbMap)
 			if bestSongID == "test-song" {
 				correctCount++
 			}
@@ -141,7 +142,7 @@ func BM1_SNR(runDir string, cleanSamples []float64, cleanFps []Fingerprint, dbMa
 	writeJSON(filepath.Join(runDir, "BM1_SNR.json"), results)
 }
 
-func BM2_TRANSCODE(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMap map[uint64][]DBEntry) {
+func BM2_TRANSCODE(runDir string, cleanWavPath string, cleanFps []SpectralSpyEngine.Fingerprint, dbMap map[uint64][]SpectralSpyEngine.DBEntry) {
 	fmt.Println("Running Benchmark #2: Bitrate")
 	bitrates := []int{256, 160, 96, 48, 16}
 	trials := 30
@@ -176,7 +177,7 @@ func BM2_TRANSCODE(runDir string, cleanWavPath string, cleanFps []Fingerprint, d
 			}
 
 			t0 := time.Now()
-			fps := Process(context.Background(), samples)
+			fps := SpectralSpyEngine.Process(context.Background(), samples)
 			dur := time.Since(t0)
 
 			hr := 0.0
@@ -194,7 +195,7 @@ func BM2_TRANSCODE(runDir string, cleanWavPath string, cleanFps []Fingerprint, d
 			surv := float64(survived) / float64(len(cleanFps))
 			survivalStats = append(survivalStats, surv)
 
-			bestSongID, _, timeOffset, _ := MatchFingerprints(fps, dbMap)
+			bestSongID, _, timeOffset, _ := SpectralSpyEngine.MatchFingerprints(fps, dbMap)
 			if bestSongID == "test-song" {
 				correctCount++
 			}
@@ -219,7 +220,7 @@ func BM2_TRANSCODE(runDir string, cleanWavPath string, cleanFps []Fingerprint, d
 	writeJSON(filepath.Join(runDir, "BM2_TRANSCODE.json"), allResults)
 }
 
-func BM3_COMPRESSION(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMap map[uint64][]DBEntry) {
+func BM3_COMPRESSION(runDir string, cleanWavPath string, cleanFps []SpectralSpyEngine.Fingerprint, dbMap map[uint64][]SpectralSpyEngine.DBEntry) {
 	fmt.Println("Running Benchmark #3: Dynamic Compression")
 	rng := rand.New(rand.NewSource(123))
 	trials := 30
@@ -273,7 +274,7 @@ func BM3_COMPRESSION(runDir string, cleanWavPath string, cleanFps []Fingerprint,
 			}
 
 			t0 := time.Now()
-			fps := Process(context.Background(), samples)
+			fps := SpectralSpyEngine.Process(context.Background(), samples)
 			dur := time.Since(t0)
 
 			hr := 0.0
@@ -290,7 +291,7 @@ func BM3_COMPRESSION(runDir string, cleanWavPath string, cleanFps []Fingerprint,
 			}
 			survivalStats = append(survivalStats, float64(survived)/float64(len(cleanFps)))
 
-			bestSongID, _, timeOffset, _ := MatchFingerprints(fps, dbMap)
+			bestSongID, _, timeOffset, _ := SpectralSpyEngine.MatchFingerprints(fps, dbMap)
 			if bestSongID == "test-song" {
 				correctCount++
 			}
@@ -315,7 +316,7 @@ func BM3_COMPRESSION(runDir string, cleanWavPath string, cleanFps []Fingerprint,
 	writeJSON(filepath.Join(runDir, "BM3_COMPRESSION.json"), allResults)
 }
 
-func BM4_EQ(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMap map[uint64][]DBEntry) {
+func BM4_EQ(runDir string, cleanWavPath string, cleanFps []SpectralSpyEngine.Fingerprint, dbMap map[uint64][]SpectralSpyEngine.DBEntry) {
 	fmt.Println("Running Benchmark #4: Equalization")
 	rng := rand.New(rand.NewSource(124))
 	trials := 30
@@ -369,7 +370,7 @@ func BM4_EQ(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMap ma
 			}
 
 			t0 := time.Now()
-			fps := Process(context.Background(), samples)
+			fps := SpectralSpyEngine.Process(context.Background(), samples)
 			dur := time.Since(t0)
 			hr := 0.0
 			if dur.Seconds() > 0 {
@@ -385,7 +386,7 @@ func BM4_EQ(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMap ma
 			}
 			survivalStats = append(survivalStats, float64(survived)/float64(len(cleanFps)))
 
-			bestSongID, _, timeOffset, _ := MatchFingerprints(fps, dbMap)
+			bestSongID, _, timeOffset, _ := SpectralSpyEngine.MatchFingerprints(fps, dbMap)
 			if bestSongID == "test-song" {
 				correctCount++
 			}
@@ -410,7 +411,7 @@ func BM4_EQ(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMap ma
 	writeJSON(filepath.Join(runDir, "BM4_EQ.json"), allResults)
 }
 
-func BM5_REVERB(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMap map[uint64][]DBEntry) {
+func BM5_REVERB(runDir string, cleanWavPath string, cleanFps []SpectralSpyEngine.Fingerprint, dbMap map[uint64][]SpectralSpyEngine.DBEntry) {
 	fmt.Println("Running Benchmark #5: Reverberation")
 	rng := rand.New(rand.NewSource(125))
 	trials := 30
@@ -472,7 +473,7 @@ func BM5_REVERB(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMa
 			}
 
 			t0 := time.Now()
-			fps := Process(context.Background(), samples)
+			fps := SpectralSpyEngine.Process(context.Background(), samples)
 			dur := time.Since(t0)
 			hr := 0.0
 			if dur.Seconds() > 0 {
@@ -488,7 +489,7 @@ func BM5_REVERB(runDir string, cleanWavPath string, cleanFps []Fingerprint, dbMa
 			}
 			survivalStats = append(survivalStats, float64(survived)/float64(len(cleanFps)))
 
-			bestSongID, _, timeOffset, _ := MatchFingerprints(fps, dbMap)
+			bestSongID, _, timeOffset, _ := SpectralSpyEngine.MatchFingerprints(fps, dbMap)
 			if bestSongID == "test-song" {
 				correctCount++
 			}
@@ -530,7 +531,7 @@ func BM6_HASHRATE(runDir string, cleanSamples []float64) {
 	var allResults []HashRateResult
 
 	for durSec := 0.5; durSec <= 20.0; durSec += 2.0 {
-		length := int(durSec * SAMPLE_RATE)
+		length := int(durSec * SpectralSpyEngine.SAMPLE_RATE)
 		if length > len(cleanSamples) {
 			length = len(cleanSamples)
 		}
@@ -541,7 +542,7 @@ func BM6_HASHRATE(runDir string, cleanSamples []float64) {
 
 		for t := 0; t < trials; t++ {
 			t0 := time.Now()
-			fps := Process(context.Background(), slice)
+			fps := SpectralSpyEngine.Process(context.Background(), slice)
 			durations = append(durations, time.Since(t0).Seconds())
 			hashCount = len(fps)
 		}
@@ -614,7 +615,7 @@ func BM7_HASHCOLLISION(runDir, dbPath string) {
 	writeJSON(filepath.Join(runDir, "BM7_HASHCOLLISION.json"), res)
 }
 
-func BM8_LOADTEST(runDir, dbPath string, cleanFps []Fingerprint) {
+func BM8_LOADTEST(runDir, dbPath string, cleanFps []SpectralSpyEngine.Fingerprint) {
 	fmt.Println("Running Benchmark #8: Full HTTP Load Testing")
 
 	dbConn, err := getDBConn(dbPath)

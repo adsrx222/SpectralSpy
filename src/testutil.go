@@ -16,12 +16,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adsrx222/SpectralSpy/src/fp-engine"
 	"github.com/go-audio/audio"
 	"github.com/go-audio/wav"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const WAVEFORM_PATH = "../live-demo/workspace/waveforms"
+const WAVEFORM_PATH = "../workspace/waveforms"
 
 // MATH UTILS
 
@@ -102,7 +103,6 @@ func findRandomClip(waveformPath string) (string, error) {
 }
 
 func findRandomPath(waveformPath string, clipLen int) (string, error) {
-	// Find a random WAV file.
 	randomWav, err := findRandomClip(waveformPath)
 	if err != nil {
 		return "", fmt.Errorf("error finding random waveform: %w", err)
@@ -128,14 +128,14 @@ func findRandomPath(waveformPath string, clipLen int) (string, error) {
 		)
 	}
 
-	// pick a random starting point.
+	// pick a random starting point
 	maxStart := len(waveform) - clipSamples
 	start := rand.Intn(maxStart + 1)
 	end := start + clipSamples
 
 	clip := waveform[start:end]
 
-	// create temporary WAV file.
+	// create temporary WAV file
 	tmpFile, err := os.CreateTemp("", "clean-*.wav")
 	if err != nil {
 		return "", fmt.Errorf("creating temporary WAV: %w", err)
@@ -210,7 +210,7 @@ func makeSilence(n int) []float64 {
 func makeSine(n int, freq float64) []float64 {
 	out := make([]float64, n)
 	for i := range out {
-		out[i] = math.Sin(2 * math.Pi * freq * float64(i) / SAMPLE_RATE)
+		out[i] = math.Sin(2 * math.Pi * freq * float64(i) / SpectralSpyEngine.SAMPLE_RATE)
 	}
 	return out
 }
@@ -423,11 +423,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 	var dsn string
 	if t != nil {
-		// Create a temporary directory that is automatically cleaned up after the test
+		// create temporary directory that is automatically cleaned up after the test
 		dbPath := filepath.Join(t.TempDir(), "test.db")
 		dsn = fmt.Sprintf("file:%s?cache=shared&_journal_mode=WAL&_busy_timeout=5000", dbPath)
 	} else {
-		// Fallback to an in-memory database if no test context is provided
+		// fallback to in-memory database if no test context is provided
 		dsn = "file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000"
 	}
 
@@ -439,7 +439,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		panic(fmt.Errorf("failed to open db: %w", err))
 	}
 
-	// Since it is always temporary, we always initialize the schema
+	// since it is always temporary, we always initialize the schema
 	if err := InitSchema(dbConn); err != nil {
 		if t != nil {
 			t.Fatalf("Failed to init schema: %v", err)
@@ -468,7 +468,7 @@ func writeJSON(path string, data interface{}) {
 	os.WriteFile(path, b, 0644)
 }
 
-func hashesFrom(entries []Fingerprint) []uint64 {
+func hashesFrom(entries []SpectralSpyEngine.Fingerprint) []uint64 {
 	out := make([]uint64, len(entries))
 	for i, e := range entries {
 		out[i] = e.Hash
@@ -476,7 +476,7 @@ func hashesFrom(entries []Fingerprint) []uint64 {
 	return out
 }
 
-func hashSet(entries []Fingerprint) map[uint64]struct{} {
+func hashSet(entries []SpectralSpyEngine.Fingerprint) map[uint64]struct{} {
 	m := make(map[uint64]struct{}, len(entries))
 	for _, e := range entries {
 		m[e.Hash] = struct{}{}
@@ -484,9 +484,9 @@ func hashSet(entries []Fingerprint) map[uint64]struct{} {
 	return m
 }
 
-func makeSpectrogram(samples []float64) Spectrogram {
+func makeSpectrogram(samples []float64) SpectralSpyEngine.Spectrogram {
 	ctx := context.Background()
-	return buildSpectrogram(ctx, samples)
+	return SpectralSpyEngine.BuildSpectrogram(ctx, samples)
 }
 
 func getSongID(wavPath string) string {

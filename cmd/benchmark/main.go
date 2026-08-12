@@ -14,7 +14,7 @@ import (
 go run cmd/benchmark/main.go \
   --output="./benchmark-results" \
   --dbpath="./live-demo/workspace/db.sqlite" \
-  --waveform="./live-demo/workspace/waveforms"
+  --waveform="./workspace/waveforms"
 */
 
 func main() {

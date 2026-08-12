@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	SpectralSpy "github.com/adsrx222/SpectralSpy/src"
+	"github.com/adsrx222/SpectralSpy/src"
 	"github.com/gin-gonic/gin"
 )
 

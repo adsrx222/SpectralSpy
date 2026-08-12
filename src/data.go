@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	SpectralSpyEngine "github.com/adsrx222/SpectralSpy/src/fp-engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -55,7 +56,7 @@ func saveModel(modelPath string, models Models) error {
 	return nil
 }
 
-func processFingerprints(ctx context.Context, db *sql.DB, songID string, fps []Fingerprint) error {
+func processFingerprints(ctx context.Context, db *sql.DB, songID string, fps []SpectralSpyEngine.Fingerprint) error {
 	if len(fps) == 0 {
 		return nil // exit if len = 0
 	}
@@ -109,7 +110,7 @@ func processFingerprints(ctx context.Context, db *sql.DB, songID string, fps []F
 	return tx.Commit()
 }
 
-func processConstellation(workspacePath, songID string, constellation [][]ConstellationPoint) error {
+func processConstellation(workspacePath, songID string, constellation [][]SpectralSpyEngine.ConstellationPoint) error {
 	constellationBytes, err := msgpack.Marshal(constellation)
 	if err != nil {
 		return fmt.Errorf("failed encoding peaks: %w", err)
@@ -124,7 +125,7 @@ func processConstellation(workspacePath, songID string, constellation [][]Conste
 }
 
 func processSamples(ctx context.Context, db *sql.DB, songID, workspacePath string, samples []float64) error {
-	fps, constellation := ProcessWithPeaks(ctx, samples)
+	fps, constellation := SpectralSpyEngine.ProcessWithPeaks(ctx, samples)
 	
 	err := processFingerprints(ctx, db, songID, fps)
 	if err != nil {
@@ -161,7 +162,6 @@ func RunDP(ctx context.Context, db *sql.DB) error {
 	}
 
 	workspacePath := os.Args[2]
-    // FIX: Accept all remaining arguments as schema paths
 	schemaPaths := os.Args[3:]
 
 	waveformPath := filepath.Join(workspacePath, "waveforms") // location of .WAV files
@@ -173,19 +173,18 @@ func RunDP(ctx context.Context, db *sql.DB) error {
     
 	fmt.Printf("Found %d WAV files in workspace.\n", len(files))
 
-    // FIX: Iterate over all provided schema paths
 	for _, schemaPath := range schemaPaths {
 		schemaBytes, err := os.ReadFile(schemaPath)
 		if err != nil {
 			return fmt.Errorf("failed to read %s: %w", schemaPath, err)
 		}
 
-		// Split the schema SQL by semicolons and execute each statement
+		// split the schema SQL by semicolons and execute each statement
 		queries := strings.Split(string(schemaBytes), ";")
 		for _, query := range queries {
 			query = strings.TrimSpace(query)
 			if query == "" {
-				continue // Skip empty statements
+				continue // skip empty statements
 			}
 			if _, err := db.Exec(query); err != nil {
 				return fmt.Errorf("failed to execute query %s in %s: %w", query, schemaPath, err)

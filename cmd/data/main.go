@@ -16,7 +16,6 @@ func main() {
 	}
 	dbPath := os.Args[1]
 
-	// open SQLite database
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
@@ -25,7 +24,6 @@ func main() {
 
 	ctx := context.Background()
 	
-	// Execute the Run function from data_processing.go
 	if err := SpectralSpy.RunDP(ctx, db); err != nil {
 		log.Fatalf("Data processing failed: %v", err)
 	}

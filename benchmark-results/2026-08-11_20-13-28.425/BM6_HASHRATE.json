@@ -1,0 +1,92 @@
+[
+  {
+    "audio_duration": 0.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.005094451366666667,
+    "p95_processing_duration": 0.013408501599999997,
+    "p99_processing_duration": 0.016606746749999998,
+    "hash_count": 4,
+    "hashes_per_second": 785.1679625743932
+  },
+  {
+    "audio_duration": 2.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.012201920866666665,
+    "p95_processing_duration": 0.02282717065,
+    "p99_processing_duration": 0.02416743782,
+    "hash_count": 47,
+    "hashes_per_second": 3851.8525495764434
+  },
+  {
+    "audio_duration": 4.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.010226913866666664,
+    "p95_processing_duration": 0.02356339769999999,
+    "p99_processing_duration": 0.02932652957,
+    "hash_count": 47,
+    "hashes_per_second": 4595.7168127904715
+  },
+  {
+    "audio_duration": 6.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.014066816733333333,
+    "p95_processing_duration": 0.029838777049999998,
+    "p99_processing_duration": 0.03176497264,
+    "hash_count": 47,
+    "hashes_per_second": 3341.196582779584
+  },
+  {
+    "audio_duration": 8.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.011936923566666667,
+    "p95_processing_duration": 0.021080222549999996,
+    "p99_processing_duration": 0.02430270439,
+    "hash_count": 47,
+    "hashes_per_second": 3937.362900709646
+  },
+  {
+    "audio_duration": 10.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.0135812902,
+    "p95_processing_duration": 0.022566933149999996,
+    "p99_processing_duration": 0.02574045764,
+    "hash_count": 47,
+    "hashes_per_second": 3460.643231082714
+  },
+  {
+    "audio_duration": 12.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.014441831900000002,
+    "p95_processing_duration": 0.026320293599999992,
+    "p99_processing_duration": 0.02891594911,
+    "hash_count": 47,
+    "hashes_per_second": 3254.4347784577103
+  },
+  {
+    "audio_duration": 14.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.016082772099999997,
+    "p95_processing_duration": 0.032461850149999985,
+    "p99_processing_duration": 0.041248537499999995,
+    "hash_count": 47,
+    "hashes_per_second": 2922.381770242209
+  },
+  {
+    "audio_duration": 16.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.012100211233333331,
+    "p95_processing_duration": 0.021482702449999995,
+    "p99_processing_duration": 0.023014125429999997,
+    "hash_count": 47,
+    "hashes_per_second": 3884.2297124967276
+  },
+  {
+    "audio_duration": 18.5,
+    "trial_count": 30,
+    "mean_processing_duration": 0.010295270700000001,
+    "p95_processing_duration": 0.017111799849999998,
+    "p99_processing_duration": 0.018929005,
+    "hash_count": 47,
+    "hashes_per_second": 4565.202933420682
+  }
+]

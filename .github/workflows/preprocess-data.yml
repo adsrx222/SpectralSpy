@@ -62,14 +62,13 @@ jobs:
             -d ./workspace/db.sqlite \
             -m ./cmd/data/main.go
 
+      - name: Set up Turso CLI
+        uses: tursodatabase/setup-turso@v1
+
       - name: Replace Database on Turso
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
         run: |
-          # Install Turso CLI
-          curl -sL https://get.turso.tech/install.sh | bash
-          export PATH="$HOME/.turso:$PATH"
-          
           echo "Destroying existing database (if it exists)..."
           turso db destroy --yes spectralspy-db || true
           
@@ -81,8 +80,10 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }} 
         run: |
-          R2_ENDPOINT="https://<your-account-id>.r2.cloudflarestorage.com"
+          # UPDATED: Use the secret in the endpoint URL
+          R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           BUCKET="s3://spectralspy"
           
           aws s3 sync ./workspace/waveforms $BUCKET/waveforms \

@@ -87,19 +87,24 @@ jobs:
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
         run: |
-          set -euo pipefail
-
-          curl -sSfL https://get.tur.so/install.sh | bash -s -- ---
-
-          export PATH="$HOME/.turso/bin:$PATH"
-
-          turso --version
-
+          # ensure sqlite3 is installed on the runner
+          sudo apt-get update -qq
+          sudo apt-get install -y sqlite3
+          
+          # convert database to WAL mode and run checkpoint
+          echo "Converting SQLite database to WAL mode and checkpointing..."
+          sqlite3 ./workspace/db.sqlite "PRAGMA journal_mode=WAL; PRAGMA wal_checkpoint(TRUNCATE);"
+          
+          # install Turso CLI
+          curl -sL https://get.turso.tech/install.sh | bash
+          
           echo "Destroying existing database (if it exists)..."
-          turso db destroy --yes spectralspy-db || true
-
-          echo "Creating new database from local SQLite file..."
-          turso db create spectralspy-db --from-file ./workspace/db.sqlite
+          # use absolute path to bypass shell PATH issues
+          $HOME/.turso/turso db destroy --yes spectralspy-db || true
+          
+          echo "Importing database into Turso..."
+          # use the import command
+          $HOME/.turso/turso db import --name spectralspy-db ./workspace/db.sqlite
 
       - name: Upload Waveforms and Constellations to Cloudflare R2 (S3)
         env:

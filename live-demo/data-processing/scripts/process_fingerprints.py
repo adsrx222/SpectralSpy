@@ -9,10 +9,10 @@ import glob
 
 """
 Example usage:
-    python ./live-demo/scripts/process_fingerprints.py \
-        --workspace "./live-demo/workspace" \
-        --schema "live-demo/db/schema.sql" "db/schema.sql" \
-        --db "./live-demo/workspace/db.sqlite" \
+    python3 live-demo/data-processing/scripts/process_fingerprints.py \
+        --workspace "./workspace" \
+        --schema "live-demo/server/db/schema.sql" "src/schema.sql" \
+        --db "./workspace/db.sqlite" \
         --main-go "./cmd/data/main.go"
 """
 

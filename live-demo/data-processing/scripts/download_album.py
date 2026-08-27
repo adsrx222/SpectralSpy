@@ -25,7 +25,7 @@ Example:
     python live-demo/scripts/download_album.py \
     ./live-demo/workspace \
     "https://www.youtube.com/playlist?list=PL5A-FXHBxgj3Gfluaje-MuhXC5iBsZF5w" \
-    ./live-demo/db/schema.sql \
+    ./live-demo/server/db/schema.sql \
     ./live-demo/workspace/db.sqlite
 """
 

@@ -10,19 +10,15 @@ import (
 )
 
 func main() {
-	// Securely require the path to the config file rather than raw secrets
 	if len(os.Args) < 2 {
 		log.Fatalf("Usage: %s <path-to-.env-file>", os.Args[0])
 	}
 
-	envFilePath := os.Args[1]
-	
-	envVars, err := readEnvFile(envFilePath)
+	envVars, err := readEnvFile(os.Args[1])
 	if err != nil {
 		log.Fatalf("Failed to read environment file: %v", err)
 	}
 
-	// Populate the config struct
 	cfg := livedemo.Config{
 		DBUrl:             envVars["DB_URL"],
 		DBAuthToken:       envVars["DB_AUTH_TOKEN"],
@@ -34,13 +30,11 @@ func main() {
 		Port:              envVars["PORT"],
 	}
 
-	// Start the application
 	if err := livedemo.Run(cfg); err != nil {
 		log.Fatalf("Application crashed: %v", err)
 	}
 }
 
-// readEnvFile securely parses a simple .env file into a map
 func readEnvFile(path string) (map[string]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -53,23 +47,13 @@ func readEnvFile(path string) (map[string]string, error) {
 	
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
-		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			val := strings.TrimSpace(parts[1])
-			
-			// Strip surrounding quotes if present
-			val = strings.Trim(val, `"'`)
-			
-			envMap[key] = val
+			envMap[strings.TrimSpace(parts[0])] = strings.Trim(strings.TrimSpace(parts[1]), `"'`)
 		}
 	}
-	
 	return envMap, scanner.Err()
 }

@@ -1,20 +1,12 @@
-// Package livedemo composes SpectralSpy's core identify handler (from the
-// server package, via HandleIdentify in identify.go) together with this
-// project's demo-specific concerns: rate limiting, structured async request
-// logging, CORS, static file serving, and the MIDI/constellation download
-// endpoints backed by S3.
-//
-// Nothing in this package is required to use server.Identify() elsewhere —
-// this is one particular application built on top of it.
 package livedemo
 
 import (
+	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
-	"database/sql"
-	"log/slog"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -22,10 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
-
-// ─────────────────────────────────────────────────────────────────────────
-// App
-// ─────────────────────────────────────────────────────────────────────────
 
 type App struct {
 	DB               *sql.DB
@@ -38,8 +26,7 @@ type App struct {
 	LogChan          chan LogEntry
 }
 
-// NewApp initializes and returns an app instance with configured dependencies.
-func NewApp(dbConn *sql.DB, s3Client *s3.Client, bucket string, logger *slog.Logger) *App {
+func NewApp(db *sql.DB, s3Client *s3.Client, bucket string, logger *slog.Logger) *App {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -50,14 +37,14 @@ func NewApp(dbConn *sql.DB, s3Client *s3.Client, bucket string, logger *slog.Log
 	}
 
 	app := &App{
-		DB:               dbConn,
+		DB:               db,
 		S3:               s3Client,
 		PresignClient:    presignClient,
 		Bucket:           bucket,
 		Logger:           logger,
-		Limiters:         NewIPRateLimiter(rate.Limit(5), 10), // 5 req/sec, burst 10
+		Limiters:         NewIPRateLimiter(rate.Limit(5), 10),
 		DisableRateLimit: false,
-		LogChan:          make(chan LogEntry, 10000), // non-blocking async log buffer
+		LogChan:          make(chan LogEntry, 10000),
 	}
 
 	app.startLogWorker()
@@ -65,7 +52,6 @@ func NewApp(dbConn *sql.DB, s3Client *s3.Client, bucket string, logger *slog.Log
 	return app
 }
 
-// background goroutine to handle I/O logging off the critical HTTP path
 func (a *App) startLogWorker() {
 	go func() {
 		for entry := range a.LogChan {
@@ -79,10 +65,6 @@ func (a *App) startLogWorker() {
 		}
 	}()
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// Rate limiting & middleware
-// ─────────────────────────────────────────────────────────────────────────
 
 type LogEntry struct {
 	Method     string
@@ -129,7 +111,6 @@ func (a *App) LoggerMiddleware() gin.HandlerFunc {
 			IP:         c.ClientIP(),
 		}
 
-		// non-blocking write to logging channel prevents worker stalling
 		select {
 		case a.LogChan <- entry:
 		default:
@@ -147,21 +128,16 @@ func (a *App) RateLimitMiddleware() gin.HandlerFunc {
 				return
 			}
 		}
-		
+
 		c.Next()
 	}
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// Media endpoints (MIDI / constellation, presigned S3 downloads)
-// ─────────────────────────────────────────────────────────────────────────
 
 type APIError struct {
 	Error   string `json:"error"`
 	Details string `json:"details,omitempty"`
 }
 
-// GET /api/v1/songs/:id/constellation
 func (a *App) HandleGetConstellation(c *gin.Context) {
 	if a.PresignClient == nil {
 		respondError(c, http.StatusServiceUnavailable, "S3 storage is not configured")
@@ -200,34 +176,28 @@ func respondError(c *gin.Context, status int, message string) {
 	})
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Routes
-// ─────────────────────────────────────────────────────────────────────────
-
 func (a *App) Routes() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 
-	// CORS Configuration
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// apply Middlewares
 	r.Use(a.LoggerMiddleware())
 	r.Use(a.RateLimitMiddleware())
 
-	// api routes
+	r.GET("/health", func(c *gin.Context) {
+		c.String(http.StatusOK, "OK")
+	})
+
 	api := r.Group("/api/v1")
 	{
-		// livedemo's own HandleIdentify (in identify.go) wraps
-		// server.Identify() (the core matching logic) and layers on
-		// ?include=artist,song support via livedemo's own songs table.
 		api.POST("/identify", a.HandleIdentify)
 		api.GET("/songs/:id/constellation", a.HandleGetConstellation)
 	}

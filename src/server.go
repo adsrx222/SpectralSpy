@@ -162,7 +162,6 @@ func Identify(ctx context.Context, db *sql.DB, logger *slog.Logger, fingerprints
 	}, nil
 }
 
-// thin HTTP wrapper around Identify() with no extra behavior
 func NewIdentifyHandler(db *sql.DB, logger *slog.Logger) gin.HandlerFunc {
 	if logger == nil {
 		logger = slog.Default()

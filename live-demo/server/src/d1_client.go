@@ -81,6 +81,7 @@ func (c *d1Conn) Begin() (driver.Tx, error) {
 }
 
 func (t *d1Tx) Commit() error   { return nil }
+
 func (t *d1Tx) Rollback() error { return nil }
 
 func (s *d1Stmt) Close() error {
@@ -105,14 +106,6 @@ func (s *d1Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (dri
 
 func (s *d1Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	return s.conn.QueryContext(ctx, s.query, args)
-}
-
-func valuesToNamed(args []driver.Value) []driver.NamedValue {
-	named := make([]driver.NamedValue, len(args))
-	for i, v := range args {
-		named[i] = driver.NamedValue{Ordinal: i + 1, Value: v}
-	}
-	return named
 }
 
 func (c *d1Conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -191,20 +184,6 @@ func (c *d1Conn) executeQuery(ctx context.Context, query string, args []driver.N
 	return results, nil
 }
 
-func newD1Rows(results []map[string]interface{}) *d1Rows {
-	var cols []string
-	if len(results) > 0 {
-		for k := range results[0] {
-			cols = append(cols, k)
-		}
-	}
-	return &d1Rows{
-		results: results,
-		cols:    cols,
-		index:   0,
-	}
-}
-
 func (r *d1Rows) Columns() []string {
 	return r.cols
 }
@@ -226,4 +205,26 @@ func (r *d1Rows) Next(dest []driver.Value) error {
 	}
 
 	return nil
+}
+
+func valuesToNamed(args []driver.Value) []driver.NamedValue {
+	named := make([]driver.NamedValue, len(args))
+	for i, v := range args {
+		named[i] = driver.NamedValue{Ordinal: i + 1, Value: v}
+	}
+	return named
+}
+
+func newD1Rows(results []map[string]interface{}) *d1Rows {
+	var cols []string
+	if len(results) > 0 {
+		for k := range results[0] {
+			cols = append(cols, k)
+		}
+	}
+	return &d1Rows{
+		results: results,
+		cols:    cols,
+		index:   0,
+	}
 }

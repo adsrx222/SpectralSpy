@@ -1,8 +1,0 @@
-name = "livedemo-worker"
-main = "worker.js"
-compatibility_date = "2024-09-01"
-
-[rules]
-globs = ["**/*.wasm"]
-type = "CompiledWasm"
-fallthrough = false

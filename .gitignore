@@ -3,3 +3,4 @@ workspace
 .venv
 .DS_Store
 live-demo/server/dist/
+.wrangler
